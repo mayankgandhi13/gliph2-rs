@@ -52,7 +52,9 @@ gliph2-rs/
 │   ├── motif.rs             # k-mer extraction + reference table
 │   ├── enrichment.rs        # deterministic Fisher's exact test
 │   ├── cluster_assembly.rs  # union-find merge
-│   └── io.rs                # CDR3 input parsing
+│   ├── io.rs                # CDR3 input parsing
+│   ├── synthetic.rs         # deterministic synthetic repertoires
+│   └── main.rs              # `gliph2-rs` CLI
 ├── bindings/
 │   ├── r/                   # extendr wrapper
 │   └── python/              # PyO3 wrapper (optional)
@@ -72,6 +74,26 @@ clusters <- assemble_clusters(local, motifs)
 
 A PyO3 binding is planned for comparison against Python tools like clusTCR and GIANA.
 
+## Usage
+
+```bash
+cargo build --release
+./target/release/gliph2-rs cluster --input tcrs.tsv --reference ref_CD4.txt --out results
+# -> results_clusters.tsv, results_motifs.tsv, and a JSON timing line on stdout
+```
+
+Input is a GLIPH2-style TSV (`CDR3b  TRBV  TRBJ  CDR3a  subject:condition  count`), a header-named table, or one CDR3 per line.
+
+**Local clustering without O(n²):** within each length bucket, each position is masked in turn and the bucket is sorted by the masked sequence. Two distinct sequences differ at exactly one position iff they collide under exactly one mask, so every Hamming-1 pair is found exactly once in O(n·L·log n).
+
+> Naming: the GLIPH2 paper calls Hamming grouping "global" and motif grouping "local"; this crate uses *local* for Hamming edges and *motif* for enriched k-mers.
+
+### Running on an HPC cluster (Slurm)
+
+```bash
+sbatch hpc/bench_scaling.sbatch   # size + thread scaling, reproducibility hashes
+```
+
 ## Validation plan
 
 1. Run original GLIPH2 and gliph2-rs on identical TCR repertoire data with the same parameters
@@ -83,11 +105,12 @@ A PyO3 binding is planned for comparison against Python tools like clusTCR and G
 
 ## Roadmap
 
-- [ ] Input parsing + length bucketing
-- [ ] Local similarity clustering
-- [ ] Union-find cluster assembly
-- [ ] Motif extraction + reference frequency table
-- [ ] Deterministic enrichment testing
+- [x] Input parsing + length bucketing
+- [x] Local similarity clustering
+- [x] Union-find cluster assembly
+- [x] Motif extraction + reference frequency table
+- [x] Deterministic enrichment testing
+- [x] Synthetic scaling benchmark (Slurm, `hpc/bench_scaling.sbatch`)
 - [ ] R binding (extendr)
 - [ ] Python binding (PyO3)
 - [ ] Benchmark suite vs. GLIPH2

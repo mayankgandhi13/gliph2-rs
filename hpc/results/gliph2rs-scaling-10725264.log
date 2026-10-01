@@ -1,0 +1,33 @@
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded crossbeam-utils v0.8.23
+  Downloaded rayon v1.12.0
+  Downloaded crossbeam-epoch v0.9.21
+  Downloaded either v1.18.0
+  Downloaded crossbeam-deque v0.8.8
+  Downloaded rayon-core v1.13.0
+   Compiling crossbeam-utils v0.8.23
+   Compiling crossbeam-epoch v0.9.21
+   Compiling crossbeam-deque v0.8.8
+   Compiling rayon-core v1.13.0
+   Compiling either v1.18.0
+   Compiling rayon v1.12.0
+   Compiling gliph2-rs v0.1.0 (/scratch/gandhi.may/gliph2-rs)
+    Finished `release` profile [optimized] target(s) in 25.37s
+node=d0142 cpus=32 Model name: AMD EPYC 7702 64-Core Processor
+{"rows":10000,"unique":9916,"reference":960803,"threads":32,"local_edges":1706,"motifs":299,"clusters":1069,"t_io":1.1706,"t_local":0.2547,"t_ref_table":0.8611,"t_enrich":0.0347,"t_assembly":0.0016,"t_output":0.0226,"t_total":2.3474,"label":"n10000","max_rss_kb":737276}
+{"rows":100000,"unique":98704,"reference":960803,"threads":32,"local_edges":35253,"motifs":148,"clusters":9735,"t_io":1.5298,"t_local":0.1766,"t_ref_table":0.5041,"t_enrich":0.1625,"t_assembly":0.0287,"t_output":0.0800,"t_total":2.4834,"label":"n100000","max_rss_kb":781712}
+{"rows":1000000,"unique":958591,"reference":960803,"threads":32,"local_edges":1415578,"motifs":105,"clusters":84909,"t_io":3.6825,"t_local":0.9261,"t_ref_table":0.8110,"t_enrich":0.8666,"t_assembly":0.4401,"t_output":0.3186,"t_total":7.0474,"label":"n1000000","max_rss_kb":1557008}
+{"rows":10000000,"unique":8690871,"reference":960803,"threads":32,"local_edges":20658098,"motifs":128,"clusters":740992,"t_io":20.7479,"t_local":10.0820,"t_ref_table":0.9714,"t_enrich":6.0973,"t_assembly":8.2212,"t_output":5.6532,"t_total":51.7748,"label":"n10000000","max_rss_kb":9358776}
+{"rows":1000000,"unique":958591,"reference":960803,"threads":1,"local_edges":1415578,"motifs":105,"clusters":84909,"t_io":2.7952,"t_local":8.2222,"t_ref_table":0.9098,"t_enrich":1.8190,"t_assembly":0.2771,"t_output":0.3254,"t_total":14.3489,"label":"n1000000","max_rss_kb":1346672}
+{"rows":1000000,"unique":958591,"reference":960803,"threads":2,"local_edges":1415578,"motifs":105,"clusters":84909,"t_io":2.8284,"t_local":4.3788,"t_ref_table":0.7636,"t_enrich":1.2057,"t_assembly":0.2861,"t_output":0.2975,"t_total":9.7604,"label":"n1000000","max_rss_kb":1410384}
+{"rows":1000000,"unique":958591,"reference":960803,"threads":4,"local_edges":1415578,"motifs":105,"clusters":84909,"t_io":2.8194,"t_local":2.2747,"t_ref_table":0.7331,"t_enrich":1.2176,"t_assembly":0.3175,"t_output":0.3050,"t_total":7.6677,"label":"n1000000","max_rss_kb":1409900}
+{"rows":1000000,"unique":958591,"reference":960803,"threads":8,"local_edges":1415578,"motifs":105,"clusters":84909,"t_io":2.8287,"t_local":1.3473,"t_ref_table":0.9656,"t_enrich":0.9403,"t_assembly":0.2861,"t_output":0.3412,"t_total":6.7101,"label":"n1000000","max_rss_kb":1452468}
+{"rows":1000000,"unique":958591,"reference":960803,"threads":16,"local_edges":1415578,"motifs":105,"clusters":84909,"t_io":2.8076,"t_local":0.8707,"t_ref_table":1.3148,"t_enrich":0.9019,"t_assembly":0.3109,"t_output":0.3118,"t_total":6.5191,"label":"n1000000","max_rss_kb":1503824}
+{"rows":1000000,"unique":958591,"reference":960803,"threads":32,"local_edges":1415578,"motifs":105,"clusters":84909,"t_io":2.7739,"t_local":0.6785,"t_ref_table":0.8379,"t_enrich":0.7695,"t_assembly":0.3013,"t_output":0.4012,"t_total":5.7644,"label":"n1000000","max_rss_kb":1571620}
+a650ee0266bb377945b9f6ea264676efc7e6d3f803e8ff31174fa1817eb037b7  /scratch/gandhi.may/gliph2-rs-work/10725264/repro1_clusters.tsv
+a650ee0266bb377945b9f6ea264676efc7e6d3f803e8ff31174fa1817eb037b7  /scratch/gandhi.may/gliph2-rs-work/10725264/repro2_clusters.tsv
+a650ee0266bb377945b9f6ea264676efc7e6d3f803e8ff31174fa1817eb037b7  /scratch/gandhi.may/gliph2-rs-work/10725264/repro3_clusters.tsv
+a5ce732427908a93a16dc989d4fb5e530cbc2f1b3232816d58f0b35b0ebdb019  /scratch/gandhi.may/gliph2-rs-work/10725264/repro1_motifs.tsv
+a5ce732427908a93a16dc989d4fb5e530cbc2f1b3232816d58f0b35b0ebdb019  /scratch/gandhi.may/gliph2-rs-work/10725264/repro2_motifs.tsv
+a5ce732427908a93a16dc989d4fb5e530cbc2f1b3232816d58f0b35b0ebdb019  /scratch/gandhi.may/gliph2-rs-work/10725264/repro3_motifs.tsv
