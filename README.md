@@ -1,6 +1,6 @@
 # gliph2-rs
 
-> 🚧 **Status: In progress.** This project is in the planning and early development stage. No benchmarks yet; this README describes the design and roadmap.
+> 🚧 **Status: In progress.** The core engine works and matches turboGliph's GLIPH2 convergence groups exactly on real data (see [Validation](#validation)). Bindings and scoring are not done yet.
 
 A fast, deterministic Rust reimplementation of the GLIPH2 core engine for clustering T-cell receptors (TCRs) by predicted shared antigen specificity, with bindings for R and Python.
 
@@ -18,8 +18,8 @@ Faster alternatives such as clusTCR and GIANA exist in Python, but there is no R
 ## How GLIPH2 works
 
 1. **Input:** CDR3β amino-acid sequences, with V/J genes and donor/HLA metadata
-2. **Local similarity:** group same-length CDR3s that differ by at most one amino acid (Hamming distance ≤ 1)
-3. **Global similarity:** extract 2–4 aa motifs and group sequences sharing motifs that are enriched vs. a reference repertoire
+2. **Local similarity:** extract 2–4 aa motifs from the CDR3 interior and group sequences sharing motifs that are enriched vs. a reference repertoire
+3. **Global similarity:** group same-length CDR3s whose interiors differ by at most one amino acid
 4. **Motif enrichment:** Fisher's exact test, input vs. reference
 5. **Cluster assembly:** merge sequences connected by local or global edges
 6. **HLA scoring:** test clusters for shared HLA alleles among donors
@@ -52,9 +52,11 @@ gliph2-rs/
 │   ├── motif.rs             # k-mer extraction + reference table
 │   ├── enrichment.rs        # deterministic Fisher's exact test
 │   ├── cluster_assembly.rs  # union-find merge
-│   ├── io.rs                # CDR3 input parsing
+│   ├── convergence.rs       # GLIPH2 convergence groups (turboGliph-compatible)
+│   ├── io.rs                # parallel CDR3 input parsing
 │   ├── synthetic.rs         # deterministic synthetic repertoires
 │   └── main.rs              # `gliph2-rs` CLI
+├── hpc/                     # Slurm jobs, data setup, validation vs. turboGliph
 ├── bindings/
 │   ├── r/                   # extendr wrapper
 │   └── python/              # PyO3 wrapper (optional)
@@ -78,30 +80,50 @@ A PyO3 binding is planned for comparison against Python tools like clusTCR and G
 
 ```bash
 cargo build --release
-./target/release/gliph2-rs cluster --input tcrs.tsv --reference ref_CD4.txt --out results
-# -> results_clusters.tsv, results_motifs.tsv, and a JSON timing line on stdout
+
+# GLIPH2 convergence groups, matching turboGliph::gliph2()
+./target/release/gliph2-rs gliph2 --input tcrs.tsv --reference ref_CD48_v2.0.tsv --paper-params --out results
+# -> results_groups.tsv (type, tag, sizes, fisher.score, members) and a JSON timing line
+
+# Merged clusters (connected components of Hamming-1 and motif edges)
+./target/release/gliph2-rs cluster --input tcrs.tsv --reference ref_CD48_v2.0.tsv --fdr --out results
+# -> results_clusters.tsv, results_motifs.tsv
 ```
 
-Input is a GLIPH2-style TSV (`CDR3b  TRBV  TRBJ  CDR3a  subject:condition  count`), a header-named table, or one CDR3 per line.
+Input is a GLIPH2-style TSV (`CDR3b  TRBV  TRBJ  CDR3a  subject:condition  count`), a table with VDJtools or AIRR column names, or one CDR3 per line. `--paper-params` uses the values from GLIPH2's distributed parameter files (motif p ≤ 0.001, fold ≥ 10, CDR3 length ≥ 8, all substitutions allowed); without it, turboGliph's code defaults apply. `--gapped` / `--discontinuous` add motifs with one wildcard position, and `--fdr` thresholds Benjamini–Hochberg q-values instead of raw p-values.
 
 **Local clustering without O(n²):** within each length bucket, each position is masked in turn and the bucket is sorted by the masked sequence. Two distinct sequences differ at exactly one position iff they collide under exactly one mask, so every Hamming-1 pair is found exactly once in O(n·L·log n).
 
-> Naming: the GLIPH2 paper calls Hamming grouping "global" and motif grouping "local"; this crate uses *local* for Hamming edges and *motif* for enriched k-mers.
+> Naming: the `gliph2` command follows the GLIPH2 paper (*local* = motif groups, *global* = Hamming groups). The older `cluster` command calls Hamming edges *local*.
 
 ### Running on an HPC cluster (Slurm)
 
 ```bash
-sbatch hpc/bench_scaling.sbatch   # size + thread scaling, reproducibility hashes
+sbatch hpc/bench_scaling.sbatch    # synthetic size + thread scaling, reproducibility hashes
+sbatch hpc/setup_data.sbatch       # download Emerson 2017 cohort + GLIPH2 references, install turboGliph
+hpc/prep_hip.sh DATA_DIR           # pool the 786 repertoires into one GLIPH2-format table
+sbatch hpc/validate.sbatch         # gliph2-rs vs. turboGliph on 2K–100K subsets
+sbatch hpc/run_full_cohort.sbatch  # gliph2-rs on the full 151M-row cohort
 ```
 
-## Validation plan
+## Validation
 
-1. Run original GLIPH2 and gliph2-rs on identical TCR repertoire data with the same parameters
-2. Compare:
-   - **Cluster membership overlap** with the original
-   - **Reproducibility** across repeated runs
-   - **Wall-clock time** at the current dataset size
-   - **Scaling** at 10× and 100× size, using synthetically expanded repertoires
+The original GLIPH2 binary was unavailable (its download server is offline), so the reference implementation is [turboGliph](https://github.com/HetzDra/turboGliph)'s `gliph2()`. Both tools ran on identical subsets of the Emerson et al. 2017 cohort (786 TCRβ repertoires), against the GLIPH2 v2.0 CD4+CD8 reference (1.19M CDR3s), on 32 cores of Northeastern's Explorer cluster. Every convergence group was matched by tag and compared member by member.
+
+| Input CDR3s | Groups identical (paper settings) | Groups identical (turboGliph defaults) | gliph2-rs | turboGliph |
+|---|---|---|---|---|
+| 2,000 | 17 / 17 | 13 / 13 | 0.99 s | 18.3 s |
+| 10,000 | 210 / 210 | 109 / 109 | 0.78 s | 23.8 s |
+| 50,000 | 4,226 / 4,226 | 1,720 / 1,720 | 0.99 s | 46.3 s |
+| 100,000 | 14,869 / 14,869 | 6,164 / 6,164 | 1.03 s | 89.7 s |
+
+Times are for the paper settings; gliph2-rs times include reading the input and reference, turboGliph times cover only its `gliph2()` call. Raw results: [`hpc/results/`](hpc/results/).
+
+**Full cohort:** all 151,020,646 rows (74.2M unique CDR3s) in 4.4 minutes on 64 cores, with about 25 GB peak memory per `/usr/bin/time` (71 GB per Slurm accounting): 190 enriched motifs, 194 local groups and 72.0M global groups.
+
+**Reproducibility:** repeated runs produce byte-identical output at any thread count.
+
+Not yet compared: turboGliph's simulation-based cluster scores (network size, CDR3 length, V gene, clonal expansion, HLA).
 
 ## Roadmap
 
@@ -111,9 +133,14 @@ sbatch hpc/bench_scaling.sbatch   # size + thread scaling, reproducibility hashe
 - [x] Motif extraction + reference frequency table
 - [x] Deterministic enrichment testing
 - [x] Synthetic scaling benchmark (Slurm, `hpc/bench_scaling.sbatch`)
+- [x] Parallel, column-wise input parsing for 10⁸-row cohorts
+- [x] Gapped motifs and optional FDR control
+- [x] GLIPH2 convergence groups, validated against turboGliph on real data
+- [x] Full-cohort run (Emerson 2017, 151M rows)
+- [ ] Filtering global groups by score or size for cohort-scale output
+- [ ] Cluster scoring (network size, CDR3 length, V gene, clonal expansion, HLA)
 - [ ] R binding (extendr)
 - [ ] Python binding (PyO3)
-- [ ] Benchmark suite vs. GLIPH2
 - [ ] Write-up of results
 
 ## Acknowledgements

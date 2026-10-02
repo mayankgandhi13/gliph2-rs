@@ -4,20 +4,25 @@
 //! three residues, which are germline-encoded and shared by almost every
 //! sequence. Counts are *sequence* counts — a motif occurring twice in one
 //! CDR3 counts once.
+//!
+//! Optionally, gapped motifs are also extracted: `k` residues spanning `k + 1`
+//! positions with one interior wildcard, written with `%` (e.g. `S%G`, `SG%Q`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use rayon::prelude::*;
 
 use crate::io::SequenceId;
 
-/// A packed amino-acid k-mer (k ≤ 6): 5 bits per residue plus the length in
-/// the top 3 bits. Packing keeps tables small and hashing cheap.
+/// A packed amino-acid k-mer (k ≤ 6 positions, `%` = gap): 5 bits per
+/// position plus the length in the top 3 bits. Packing keeps tables small and
+/// hashing cheap.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Kmer(u32);
 
-const AA: &[u8; 20] = b"ACDEFGHIKLMNPQRSTVWY";
+const AA: &[u8; 21] = b"ACDEFGHIKLMNPQRSTVWY%";
+const GAP: u32 = 20;
 
 #[inline]
 fn aa_code(c: u8) -> u32 {
@@ -25,7 +30,7 @@ fn aa_code(c: u8) -> u32 {
         b'A' => 0, b'C' => 1, b'D' => 2, b'E' => 3, b'F' => 4, b'G' => 5, b'H' => 6,
         b'I' => 7, b'K' => 8, b'L' => 9, b'M' => 10, b'N' => 11, b'P' => 12, b'Q' => 13,
         b'R' => 14, b'S' => 15, b'T' => 16, b'V' => 17, b'W' => 18, b'Y' => 19,
-        _ => 31,
+        b'%' => GAP, _ => 31,
     }
 }
 
@@ -47,6 +52,15 @@ impl Kmer {
 
     pub fn is_empty(self) -> bool {
         self.len() == 0
+    }
+
+    /// Number of non-gap positions.
+    pub fn residues(self) -> usize {
+        (0..self.len()).filter(|i| (self.0 >> (5 * i)) & 31 != GAP).count()
+    }
+
+    pub fn is_gapped(self) -> bool {
+        self.residues() != self.len()
     }
 
     pub fn to_bytes(self) -> Vec<u8> {
@@ -79,11 +93,14 @@ pub struct MotifParams {
     pub trim_start: usize,
     /// Residues ignored at the C-terminal end.
     pub trim_end: usize,
+    /// Also extract gapped motifs (k residues with one interior gap) for
+    /// each k ≥ 2 in `k_values`.
+    pub gapped: bool,
 }
 
 impl Default for MotifParams {
     fn default() -> Self {
-        MotifParams { k_values: vec![2, 3, 4], trim_start: 3, trim_end: 3 }
+        MotifParams { k_values: vec![2, 3, 4], trim_start: 3, trim_end: 3, gapped: false }
     }
 }
 
@@ -99,6 +116,16 @@ pub fn extract_motifs(seq: &[u8], params: &MotifParams) -> Vec<Kmer> {
             continue;
         }
         out.extend(core.windows(k).map(Kmer::new));
+        if params.gapped && (2..Kmer::MAX_K).contains(&k) && k < core.len() {
+            let mut buf = [0u8; Kmer::MAX_K];
+            for w in core.windows(k + 1) {
+                for gap in 1..k {
+                    buf[..=k].copy_from_slice(w);
+                    buf[gap] = b'%';
+                    out.push(Kmer::new(&buf[..=k]));
+                }
+            }
+        }
     }
     out.sort_unstable();
     out.dedup();
@@ -138,12 +165,23 @@ impl MotifTable {
     }
 }
 
-/// Motif → sorted ids of the input sequences that contain it.
-pub fn motif_members(sequences: &[Vec<u8>], params: &MotifParams) -> HashMap<Kmer, Vec<SequenceId>> {
+/// Motif → sorted ids of the input sequences that contain it, restricted to
+/// `wanted` motifs (all motifs if `None`). Restricting keeps memory
+/// proportional to the significant motifs rather than every k-mer occurrence.
+pub fn motif_members(
+    sequences: &[Vec<u8>],
+    params: &MotifParams,
+    wanted: Option<&HashSet<Kmer>>,
+) -> HashMap<Kmer, Vec<SequenceId>> {
     let mut pairs: Vec<(Kmer, SequenceId)> = sequences
         .par_iter()
         .enumerate()
-        .flat_map_iter(|(i, s)| extract_motifs(s, params).into_iter().map(move |k| (k, i as SequenceId)))
+        .flat_map_iter(|(i, s)| {
+            extract_motifs(s, params)
+                .into_iter()
+                .filter(|k| wanted.is_none_or(|w| w.contains(k)))
+                .map(move |k| (k, i as SequenceId))
+        })
         .collect();
     pairs.par_sort_unstable();
     let mut out: HashMap<Kmer, Vec<SequenceId>> = HashMap::new();
@@ -165,11 +203,22 @@ mod tests {
             assert_eq!(k.len(), s.len());
         }
         assert_ne!(Kmer::new(b"A"), Kmer::new(b"AA"));
+        let g = Kmer::new(b"S%GQ");
+        assert_eq!((g.to_string().as_str(), g.len(), g.residues(), g.is_gapped()), ("S%GQ", 4, 3, true));
+    }
+
+    #[test]
+    fn extracts_gapped_motifs() {
+        let p = MotifParams { k_values: vec![2, 3], trim_start: 0, trim_end: 0, gapped: true };
+        let m: Vec<String> = extract_motifs(b"SLGQ", &p).iter().map(|k| k.to_string()).collect();
+        let mut want = vec!["SL", "LG", "GQ", "SLG", "LGQ", "S%G", "L%Q", "S%GQ", "SL%Q"];
+        want.sort_by_key(|s| Kmer::new(s.as_bytes()));
+        assert_eq!(m, want);
     }
 
     #[test]
     fn extracts_interior_only() {
-        let p = MotifParams { k_values: vec![2], trim_start: 3, trim_end: 3 };
+        let p = MotifParams { k_values: vec![2], trim_start: 3, trim_end: 3, gapped: false };
         let m: Vec<String> = extract_motifs(b"CASSLGQYF", &p).iter().map(|k| k.to_string()).collect();
         // core = "SLG"
         assert_eq!(m, vec!["LG", "SL"]);
@@ -177,7 +226,7 @@ mod tests {
 
     #[test]
     fn counts_once_per_sequence() {
-        let p = MotifParams { k_values: vec![2], trim_start: 0, trim_end: 0 };
+        let p = MotifParams { k_values: vec![2], trim_start: 0, trim_end: 0, gapped: false };
         let t = MotifTable::build(&[b"SLSL".to_vec(), b"SLAA".to_vec()], &p);
         assert_eq!(t.get(Kmer::new(b"SL")), 2);
         assert_eq!(t.get(Kmer::new(b"LS")), 1);

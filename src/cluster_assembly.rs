@@ -139,6 +139,7 @@ mod tests {
             reference_count: 0,
             fold: f64::INFINITY,
             p_value: 0.0,
+            q_value: 0.0,
             members: vec![2, 5],
         };
         let c = assemble_clusters(7, &[edge(0, 2), edge(3, 4)], &[motif], &AssemblyParams::default());

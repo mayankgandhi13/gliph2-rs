@@ -9,6 +9,7 @@
 //! *local* = Hamming edges, *motif* = enriched k-mer edges.
 
 pub mod cluster_assembly;
+pub mod convergence;
 pub mod enrichment;
 pub mod io;
 pub mod local_cluster;
@@ -19,8 +20,9 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 
 pub use cluster_assembly::{assemble_clusters, AssemblyParams, Cluster, UnionFind};
-pub use enrichment::{fisher_greater, motif_enrich, EnrichmentParams, MotifResult};
-pub use io::{read_reference, read_tcr_table, Repertoire, SequenceId, TcrRecord};
+pub use convergence::{gliph2, ConvergenceGroup, Gliph2Params, Gliph2Result};
+pub use enrichment::{benjamini_hochberg, fisher_greater, motif_enrich, EnrichmentParams, MotifResult};
+pub use io::{read_repertoire, read_sequences, Repertoire, Row, SequenceId, TcrRecord};
 pub use local_cluster::{local_cluster, LocalEdge, LocalParams};
 pub use motif::{Kmer, MotifParams, MotifTable};
 
@@ -78,33 +80,30 @@ pub fn run(sequences: &[Vec<u8>], reference: Option<&[Vec<u8>]>, params: &Params
     GliphResult { local_edges, motifs, clusters, timings: t }
 }
 
-/// Writes one row per (cluster, member sequence).
+/// Writes one row per (cluster, input row of a member sequence).
 pub fn write_clusters(w: &mut impl Write, rep: &Repertoire, clusters: &[Cluster]) -> std::io::Result<()> {
     writeln!(w, "cluster_id\tcluster_size\tn_local_edges\tmotifs\tCDR3b\tTRBV\tTRBJ\tsubject\tcount")?;
+    let name = |pool: &io::StringPool, id: u32| pool.get(id).unwrap_or("NA").to_owned();
     for c in clusters {
         let motifs = if c.motifs.is_empty() {
             "-".to_string()
         } else {
             c.motifs.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(",")
         };
+        let head = format!("{}\t{}\t{}\t{}", c.id, c.members.len(), c.n_local_edges, motifs);
         for &id in &c.members {
             let seq = std::str::from_utf8(&rep.sequences[id as usize]).unwrap();
-            let recs = &rep.records[id as usize];
-            if recs.is_empty() {
-                writeln!(w, "{}\t{}\t{}\t{}\t{}\tNA\tNA\tNA\t1", c.id, c.members.len(), c.n_local_edges, motifs, seq)?;
+            let rows = rep.rows_of(id);
+            if rows.is_empty() {
+                writeln!(w, "{head}\t{seq}\tNA\tNA\tNA\t1")?;
             }
-            for r in recs {
+            for r in rows {
                 writeln!(
                     w,
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                    c.id,
-                    c.members.len(),
-                    c.n_local_edges,
-                    motifs,
-                    seq,
-                    r.v_gene.as_deref().unwrap_or("NA"),
-                    r.j_gene.as_deref().unwrap_or("NA"),
-                    r.subject.as_deref().unwrap_or("NA"),
+                    "{head}\t{seq}\t{}\t{}\t{}\t{}",
+                    name(&rep.v_genes, r.v_gene),
+                    name(&rep.j_genes, r.j_gene),
+                    name(&rep.subjects, r.subject),
                     r.count
                 )?;
             }
@@ -114,17 +113,18 @@ pub fn write_clusters(w: &mut impl Write, rep: &Repertoire, clusters: &[Cluster]
 }
 
 pub fn write_motifs(w: &mut impl Write, motifs: &[MotifResult]) -> std::io::Result<()> {
-    writeln!(w, "motif\tk\tinput_count\treference_count\tfold\tp_value")?;
+    writeln!(w, "motif\tk\tinput_count\treference_count\tfold\tp_value\tq_value")?;
     for m in motifs {
         writeln!(
             w,
-            "{}\t{}\t{}\t{}\t{}\t{:e}",
+            "{}\t{}\t{}\t{}\t{}\t{:e}\t{:e}",
             m.motif,
-            m.motif.len(),
+            m.motif.residues(),
             m.input_count,
             m.reference_count,
             m.fold,
-            m.p_value
+            m.p_value,
+            m.q_value
         )?;
     }
     Ok(())

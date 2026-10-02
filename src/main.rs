@@ -3,7 +3,7 @@ use std::io::{BufWriter, Write};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use gliph2::{io, synthetic, Params, Repertoire};
+use gliph2::{io, synthetic, Gliph2Params, Params};
 
 const USAGE: &str = "\
 gliph2-rs — deterministic GLIPH2 core
@@ -11,12 +11,27 @@ gliph2-rs — deterministic GLIPH2 core
 USAGE:
   gliph2-rs cluster --input FILE [--reference FILE] [--out PREFIX]
                     [--threads N] [--mismatch-trim N] [--min-cluster N]
-                    [--max-p P] [--min-count N] [--no-motifs]
+                    [--max-p P] [--fdr] [--gapped] [--min-count N] [--no-motifs]
+  gliph2-rs gliph2  --input FILE --reference FILE [--out PREFIX] [--threads N]
+                    [--paper-params] [--lcminp P] [--lcminove A[,B,C]]
+                    [--kmer-mindepth N] [--min-seq-length N] [--motif-distance N]
+                    [--all-aa-interchangeable] [--global-vgene] [--discontinuous]
+                    [--min-cluster N] [--no-local] [--no-global]
   gliph2-rs synth   --n N --out FILE [--seed S] [--reference]
   gliph2-rs expand  --input FILE --factor F --out FILE [--seed S]
 
 `cluster` writes PREFIX_clusters.tsv and PREFIX_motifs.tsv and prints a
-one-line JSON timing summary to stdout.";
+one-line JSON timing summary to stdout. Inputs are TSV with a header
+(GLIPH2, VDJtools or AIRR column names) or one CDR3 per line.
+
+  --fdr     threshold Benjamini-Hochberg q-values instead of raw p-values
+  --gapped  also test gapped motifs such as S%G and SL%Q
+
+`gliph2` reports GLIPH2 convergence groups (local motif groups and global
+struct groups, not merged) with turboGliph's gliph2() semantics and defaults,
+writing PREFIX_groups.tsv. --paper-params uses the GLIPH2 parameter-file
+values instead (lcminp 0.001, lcminove 10, min length 8, all aa
+interchangeable).";
 
 struct Args(Vec<String>);
 
@@ -66,19 +81,20 @@ fn cluster(a: &Args) -> Result<(), String> {
         params.enrichment.min_count = v;
     }
     params.skip_motifs = a.flag("--no-motifs");
+    params.enrichment.fdr = a.flag("--fdr");
+    params.motif.gapped = a.flag("--gapped");
 
     let input = a.require("--input")?;
     let now = Instant::now();
-    let (records, skipped) = io::read_tcr_table(input).map_err(|e| format!("{input}: {e}"))?;
-    let n_rows = records.len();
-    let rep = Repertoire::from_records(records);
+    let rep = io::read_repertoire(input).map_err(|e| format!("{input}: {e}"))?;
+    let n_rows = rep.rows.len();
     let reference = match a.value("--reference") {
-        Some(p) => Some(io::read_reference(p).map_err(|e| format!("{p}: {e}"))?.sequences),
+        Some(p) => Some(io::read_sequences(p).map_err(|e| format!("{p}: {e}"))?),
         None => None,
     };
     let t_io = now.elapsed();
-    if skipped > 0 {
-        eprintln!("skipped {skipped} rows with invalid CDR3s");
+    if rep.skipped > 0 {
+        eprintln!("skipped {} rows with invalid CDR3s", rep.skipped);
     }
     if reference.is_none() && !params.skip_motifs {
         eprintln!("no --reference given; motif enrichment skipped");
@@ -116,6 +132,69 @@ fn cluster(a: &Args) -> Result<(), String> {
     Ok(())
 }
 
+fn gliph2_cmd(a: &Args) -> Result<(), String> {
+    let wall = Instant::now();
+    if let Some(n) = a.parse::<usize>("--threads")? {
+        rayon::ThreadPoolBuilder::new().num_threads(n).build_global().map_err(|e| e.to_string())?;
+    }
+    let mut p = if a.flag("--paper-params") { Gliph2Params::gliph2_paper() } else { Gliph2Params::default() };
+    if let Some(v) = a.parse("--lcminp")? {
+        p.lcminp = v;
+    }
+    if let Some(v) = a.value("--lcminove") {
+        p.lcminove = v.split(',').map(|x| x.parse().map_err(|_| format!("invalid --lcminove: {v}"))).collect::<Result<_, _>>()?;
+    }
+    if let Some(v) = a.parse("--kmer-mindepth")? {
+        p.kmer_mindepth = v;
+    }
+    if let Some(v) = a.parse("--min-seq-length")? {
+        p.min_seq_length = v;
+    }
+    if let Some(v) = a.parse("--motif-distance")? {
+        p.motif_distance_cutoff = v;
+    }
+    if let Some(v) = a.parse("--min-cluster")? {
+        p.cluster_min_size = v;
+    }
+    p.all_aa_interchangeable |= a.flag("--all-aa-interchangeable");
+    p.global_vgene = a.flag("--global-vgene");
+    p.discontinuous = a.flag("--discontinuous");
+    p.local = !a.flag("--no-local");
+    p.global = !a.flag("--no-global");
+
+    let input = a.require("--input")?;
+    let refp = a.require("--reference")?;
+    let now = Instant::now();
+    let rep = io::read_repertoire(input).map_err(|e| format!("{input}: {e}"))?;
+    let reference = io::read_sequences(refp).map_err(|e| format!("{refp}: {e}"))?;
+    let t_io = now.elapsed();
+
+    let now = Instant::now();
+    let res = gliph2::gliph2(&rep, &reference, &p);
+    let t_run = now.elapsed();
+
+    let prefix = a.value("--out").unwrap_or("gliph2rs");
+    let mut w = BufWriter::new(File::create(format!("{prefix}_groups.tsv")).map_err(|e| e.to_string())?);
+    gliph2::convergence::write_groups(&mut w, &rep, &res.groups).map_err(|e| e.to_string())?;
+    w.flush().map_err(|e| e.to_string())?;
+    let n_local = res.groups.iter().filter(|g| g.kind == gliph2::convergence::GroupType::Local).count();
+    println!(
+        "{{\"rows\":{},\"unique\":{},\"sample\":{},\"reference\":{},\"threads\":{},\"motifs\":{},\"local_groups\":{},\"global_groups\":{},\"t_io\":{:.4},\"t_gliph2\":{:.4},\"t_total\":{:.4}}}",
+        rep.rows.len(),
+        rep.len(),
+        res.n_sample,
+        res.n_reference,
+        rayon::current_num_threads(),
+        res.selected_motifs.len(),
+        n_local,
+        res.groups.len() - n_local,
+        t_io.as_secs_f64(),
+        t_run.as_secs_f64(),
+        wall.elapsed().as_secs_f64()
+    );
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = argv.first().cloned() else {
@@ -125,6 +204,7 @@ fn main() -> ExitCode {
     let a = Args(argv);
     let result = match cmd.as_str() {
         "cluster" => cluster(&a),
+        "gliph2" => gliph2_cmd(&a),
         "synth" => (|| {
             let n = a.parse("--n")?.ok_or("missing --n")?;
             let seed = a.parse("--seed")?.unwrap_or(1);
@@ -133,8 +213,7 @@ fn main() -> ExitCode {
         })(),
         "expand" => (|| {
             let input = a.require("--input")?;
-            let (recs, _) = io::read_tcr_table(input).map_err(|e| format!("{input}: {e}"))?;
-            let base: Vec<Vec<u8>> = recs.into_iter().map(|r| r.cdr3).collect();
+            let base = io::read_sequences(input).map_err(|e| format!("{input}: {e}"))?;
             let factor = a.parse("--factor")?.ok_or("missing --factor")?;
             let seed = a.parse("--seed")?.unwrap_or(1);
             write_seqs(a.require("--out")?, &synthetic::expand(&base, factor, seed)).map_err(|e| e.to_string())
