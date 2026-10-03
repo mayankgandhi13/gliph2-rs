@@ -17,6 +17,7 @@ USAGE:
                     [--kmer-mindepth N] [--min-seq-length N] [--motif-distance N]
                     [--all-aa-interchangeable] [--global-vgene] [--discontinuous]
                     [--min-cluster N] [--no-local] [--no-global]
+                    [--max-global-p P] [--max-global-q Q] [--min-subjects N]
   gliph2-rs synth   --n N --out FILE [--seed S] [--reference]
   gliph2-rs expand  --input FILE --factor F --out FILE [--seed S]
 
@@ -31,7 +32,9 @@ one-line JSON timing summary to stdout. Inputs are TSV with a header
 struct groups, not merged) with turboGliph's gliph2() semantics and defaults,
 writing PREFIX_groups.tsv. --paper-params uses the GLIPH2 parameter-file
 values instead (lcminp 0.001, lcminove 10, min length 8, all aa
-interchangeable).";
+interchangeable). GLIPH2 does not filter global groups; on large cohorts use
+--max-global-p / --max-global-q (Benjamini-Hochberg over global groups) and
+--min-subjects (groups spanning at least N donors) to keep the output usable.";
 
 struct Args(Vec<String>);
 
@@ -159,6 +162,11 @@ fn gliph2_cmd(a: &Args) -> Result<(), String> {
     p.all_aa_interchangeable |= a.flag("--all-aa-interchangeable");
     p.global_vgene = a.flag("--global-vgene");
     p.discontinuous = a.flag("--discontinuous");
+    p.global_max_p = a.parse("--max-global-p")?;
+    p.global_max_q = a.parse("--max-global-q")?;
+    if let Some(v) = a.parse("--min-subjects")? {
+        p.min_subjects = v;
+    }
     p.local = !a.flag("--no-local");
     p.global = !a.flag("--no-global");
 

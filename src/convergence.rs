@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use rayon::prelude::*;
 
-use crate::enrichment::{hypergeom_upper, LogFactorial};
+use crate::enrichment::{benjamini_hochberg, hypergeom_upper, LogFactorial};
 use crate::io::{Repertoire, SequenceId, NA};
 use crate::motif::Kmer;
 
@@ -56,6 +56,15 @@ pub struct Gliph2Params {
     pub cluster_min_size: usize,
     pub local: bool,
     pub global: bool,
+    /// Keep only global groups with `fisher.score ≤` this. GLIPH2 applies no
+    /// significance filter to global groups; `None` matches it.
+    pub global_max_p: Option<f64>,
+    /// Keep only global groups whose Benjamini–Hochberg q-value (over all
+    /// global groups) is `≤` this.
+    pub global_max_q: Option<f64>,
+    /// Keep only groups whose members come from at least this many distinct
+    /// subjects (0 or 1 disables). Members without a subject don't count.
+    pub min_subjects: usize,
 }
 
 impl Default for Gliph2Params {
@@ -75,6 +84,9 @@ impl Default for Gliph2Params {
             cluster_min_size: 2,
             local: true,
             global: true,
+            global_max_p: None,
+            global_max_q: None,
+            min_subjects: 0,
         }
     }
 }
@@ -145,6 +157,11 @@ pub struct ConvergenceGroup {
     /// Whole-motif fold change for local groups, 0 for global (as turboGliph).
     pub ove: f64,
     pub fisher_score: f64,
+    /// Benjamini–Hochberg q-value of `fisher_score` among groups of the same
+    /// type.
+    pub q_value: f64,
+    /// Distinct subjects among the members' input rows.
+    pub n_subjects: u32,
     /// Member sequence ids, sorted by CDR3 string.
     pub members: Vec<SequenceId>,
 }
@@ -295,6 +312,7 @@ pub fn gliph2(rep: &Repertoire, reference: &[Vec<u8>], p: &Gliph2Params) -> Glip
         result.groups.extend(global_groups(rep, &working, &ref_unique, p, &lf));
     }
     result.groups.retain(|g| g.cluster_size as usize >= p.cluster_min_size);
+    annotate_and_filter(rep, &mut result.groups, p);
     result
 }
 
@@ -405,6 +423,8 @@ fn local_groups(
                     unique_cdr3_ref: m.num_in_ref,
                     ove: m.num_fold,
                     fisher_score: round_2sig(fisher(n, m.num_in_ref)),
+                    q_value: f64::NAN,
+                    n_subjects: 0,
                     members,
                 }
             })
@@ -557,26 +577,59 @@ fn global_components(
             unique_cdr3_ref: num_in_ref,
             ove: 0.0,
             fisher_score,
+            q_value: f64::NAN,
+            n_subjects: 0,
             members: ms,
         });
     }
 }
 
+/// Fills in q-values and subject counts, then applies the optional filters.
+fn annotate_and_filter(rep: &Repertoire, groups: &mut Vec<ConvergenceGroup>, p: &Gliph2Params) {
+    for kind in [GroupType::Local, GroupType::Global] {
+        let idx: Vec<usize> = (0..groups.len()).filter(|&i| groups[i].kind == kind).collect();
+        // NaN p-values (impossible tables) are treated as 1 for ranking.
+        let pv: Vec<f64> = idx.iter().map(|&i| groups[i].fisher_score).map(|x| if x.is_nan() { 1.0 } else { x }).collect();
+        for (&i, q) in idx.iter().zip(benjamini_hochberg(&pv)) {
+            groups[i].q_value = q;
+        }
+    }
+    groups.par_iter_mut().for_each(|g| {
+        let mut subjects: Vec<u32> =
+            g.members.iter().flat_map(|&m| rep.rows_of(m).iter().map(|r| r.subject)).filter(|&s| s != NA).collect();
+        subjects.sort_unstable();
+        subjects.dedup();
+        g.n_subjects = subjects.len() as u32;
+    });
+    let keep: Vec<bool> = groups
+        .par_iter()
+        .map(|g| {
+            let global_ok = g.kind != GroupType::Global
+                || (p.global_max_p.is_none_or(|t| g.fisher_score <= t) && p.global_max_q.is_none_or(|t| g.q_value <= t));
+            global_ok && (p.min_subjects <= 1 || g.n_subjects as usize >= p.min_subjects)
+        })
+        .collect();
+    let mut k = keep.into_iter();
+    groups.retain(|_| k.next().unwrap());
+}
+
 /// Writes groups in turboGliph's `cluster_properties` layout (scores
 /// omitted); `members` is space-separated, sorted CDR3s.
 pub fn write_groups(w: &mut impl std::io::Write, rep: &Repertoire, groups: &[ConvergenceGroup]) -> std::io::Result<()> {
-    writeln!(w, "type\ttag\tcluster_size\tunique_cdr3_sample\tunique_cdr3_ref\tOvE\tfisher.score\tmembers")?;
+    writeln!(w, "type\ttag\tcluster_size\tunique_cdr3_sample\tunique_cdr3_ref\tOvE\tfisher.score\tfdr.q\tn_subjects\tmembers")?;
     for g in groups {
         write!(
             w,
-            "{}\t{}\t{}\t{}\t{}\t{}\t{:e}\t",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{:e}\t{:e}\t{}\t",
             g.kind.as_str(),
             g.tag(rep),
             g.cluster_size,
             g.unique_cdr3_sample,
             g.unique_cdr3_ref,
             g.ove,
-            g.fisher_score
+            g.fisher_score,
+            g.q_value,
+            g.n_subjects
         )?;
         for (i, &m) in g.members.iter().enumerate() {
             if i > 0 {
@@ -662,6 +715,47 @@ mod tests {
         assert_eq!(tags, vec!["WWW_4_5", "WWW_9_9"]);
         assert_eq!(www[0].members.len(), 6);
         assert_eq!(www[1].members.len(), 3);
+    }
+
+    #[test]
+    fn filters_by_subjects_and_global_significance() {
+        // Two global groups: G%ETQ shared by 3 subjects, W%WWW by one subject.
+        let rec = |cdr3: &str, subj: &str| crate::io::TcrRecord {
+            cdr3: cdr3.as_bytes().to_vec(),
+            v_gene: None,
+            j_gene: None,
+            subject: Some(subj.to_string()),
+            count: 1,
+        };
+        let r = Repertoire::from_records(vec![
+            rec("CASGQETQYQF", "P1"),
+            rec("CASGPETQYQF", "P2"),
+            rec("CASGLETQYQF", "P3"),
+            rec("CASWAWWWYQF", "P1"),
+            rec("CASWCWWWYQF", "P1"),
+        ]);
+        // 400 distinct reference CDR3s: 300 carry G%ETQ (any residue at the
+        // masked site), none carry W%WWW.
+        let aa = b"ACDEFGHIKLMNPQRSTVWY";
+        let reference: Vec<Vec<u8>> = (0..400usize)
+            .map(|i| {
+                let (x, y) = (aa[i % 20] as char, aa[(i / 20) % 20] as char);
+                if i < 300 { format!("C{x}{y}G{x}ETQYQF") } else { format!("CASSL{x}{y}GYEQYF") }.into_bytes()
+            })
+            .collect();
+        let base = Gliph2Params { local: false, all_aa_interchangeable: true, ..Default::default() };
+        let tags = |p: &Gliph2Params| {
+            let mut t: Vec<String> = gliph2(&r, &reference, p).groups.iter().map(|g| g.tag(&r)).collect();
+            t.sort();
+            t
+        };
+        assert_eq!(tags(&base), vec!["G%ETQ_LPQ", "W%WWW_AC"]);
+        let res = gliph2(&r, &reference, &base);
+        let g = res.groups.iter().find(|g| g.tag(&r) == "G%ETQ_LPQ").unwrap();
+        assert_eq!(g.n_subjects, 3);
+        assert!(g.q_value >= g.fisher_score);
+        assert_eq!(tags(&Gliph2Params { min_subjects: 2, ..base.clone() }), vec!["G%ETQ_LPQ"]);
+        assert_eq!(tags(&Gliph2Params { global_max_p: Some(0.05), ..base.clone() }), vec!["W%WWW_AC"]);
     }
 
     #[test]

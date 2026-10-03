@@ -92,6 +92,10 @@ cargo build --release
 
 Input is a GLIPH2-style TSV (`CDR3b  TRBV  TRBJ  CDR3a  subject:condition  count`), a table with VDJtools or AIRR column names, or one CDR3 per line. `--paper-params` uses the values from GLIPH2's distributed parameter files (motif p ≤ 0.001, fold ≥ 10, CDR3 length ≥ 8, all substitutions allowed); without it, turboGliph's code defaults apply. `--gapped` / `--discontinuous` add motifs with one wildcard position, and `--fdr` thresholds Benjamini–Hochberg q-values instead of raw p-values.
 
+GLIPH2 reports every global group without a significance filter, which on a pooled cohort means tens of millions of groups. The `gliph2` command adds a q-value (`fdr.q`, Benjamini–Hochberg within each group type) and a donor count (`n_subjects`) to every group, and three opt-in filters: `--max-global-p P`, `--max-global-q Q` and `--min-subjects N` (groups spanning at least N donors). All are off by default, so the output still matches turboGliph.
+
+The global-group p-value compares the sample against the reference, so it only has power when the sample is smaller than the reference (a single donor, say). On the pooled Emerson cohort, 73.6M CDR3s against a 1.19M reference, no global group can reach significance and `--max-global-q 0.05` keeps none; `--min-subjects 3` keeps 43.6M of 72.0M. Cohort-scale filtering needs a test against donor labels instead (see Roadmap).
+
 **Local clustering without O(n²):** within each length bucket, each position is masked in turn and the bucket is sorted by the masked sequence. Two distinct sequences differ at exactly one position iff they collide under exactly one mask, so every Hamming-1 pair is found exactly once in O(n·L·log n).
 
 > Naming: the `gliph2` command follows the GLIPH2 paper (*local* = motif groups, *global* = Hamming groups). The older `cluster` command calls Hamming edges *local*.
@@ -137,7 +141,8 @@ Not yet compared: turboGliph's simulation-based cluster scores (network size, CD
 - [x] Gapped motifs and optional FDR control
 - [x] GLIPH2 convergence groups, validated against turboGliph on real data
 - [x] Full-cohort run (Emerson 2017, 151M rows)
-- [ ] Filtering global groups by score or size for cohort-scale output
+- [x] Per-group q-values, donor counts and opt-in global-group filters
+- [ ] Donor-label association (e.g. CMV+ vs CMV− donors) for cohort-scale filtering
 - [ ] Cluster scoring (network size, CDR3 length, V gene, clonal expansion, HLA)
 - [ ] R binding (extendr)
 - [ ] Python binding (PyO3)
