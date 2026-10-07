@@ -18,6 +18,8 @@ USAGE:
                     [--all-aa-interchangeable] [--global-vgene] [--discontinuous]
                     [--min-cluster N] [--no-local] [--no-global]
                     [--max-global-p P] [--max-global-q Q] [--min-subjects N]
+                    [--case COND --control COND [--assoc-min-donors N]
+                     [--assoc-max-p P] [--assoc-max-q Q] [--assoc-permute-seed S]]
   gliph2-rs synth   --n N --out FILE [--seed S] [--reference]
   gliph2-rs expand  --input FILE --factor F --out FILE [--seed S]
 
@@ -34,7 +36,14 @@ writing PREFIX_groups.tsv. --paper-params uses the GLIPH2 parameter-file
 values instead (lcminp 0.001, lcminove 10, min length 8, all aa
 interchangeable). GLIPH2 does not filter global groups; on large cohorts use
 --max-global-p / --max-global-q (Benjamini-Hochberg over global groups) and
---min-subjects (groups spanning at least N donors) to keep the output usable.";
+--min-subjects (groups spanning at least N donors) to keep the output usable.
+
+--case / --control test every group for enrichment in donors of one
+condition over another, reading the condition from the subject:condition
+column (e.g. --case CMV+ --control CMV- for subjects like HIP00110:CMV+).
+Groups in at least --assoc-min-donors labelled donors (default 10) get a
+one-sided Fisher p-value and a Benjamini-Hochberg q-value.
+--assoc-permute-seed shuffles the labels among donors (a calibration control).";
 
 struct Args(Vec<String>);
 
@@ -167,6 +176,20 @@ fn gliph2_cmd(a: &Args) -> Result<(), String> {
     if let Some(v) = a.parse("--min-subjects")? {
         p.min_subjects = v;
     }
+    match (a.value("--case"), a.value("--control")) {
+        (Some(case), Some(control)) => {
+            let mut assoc = gliph2::convergence::Association::new(case, control);
+            if let Some(v) = a.parse("--assoc-min-donors")? {
+                assoc.min_donors = v;
+            }
+            assoc.max_p = a.parse("--assoc-max-p")?;
+            assoc.max_q = a.parse("--assoc-max-q")?;
+            assoc.permute_seed = a.parse("--assoc-permute-seed")?;
+            p.association = Some(assoc);
+        }
+        (None, None) => {}
+        _ => return Err("--case and --control must be given together".into()),
+    }
     p.local = !a.flag("--no-local");
     p.global = !a.flag("--no-global");
 
@@ -183,11 +206,17 @@ fn gliph2_cmd(a: &Args) -> Result<(), String> {
 
     let prefix = a.value("--out").unwrap_or("gliph2rs");
     let mut w = BufWriter::new(File::create(format!("{prefix}_groups.tsv")).map_err(|e| e.to_string())?);
-    gliph2::convergence::write_groups(&mut w, &rep, &res.groups).map_err(|e| e.to_string())?;
+    gliph2::convergence::write_groups(&mut w, &rep, &res.groups, res.association.is_some()).map_err(|e| e.to_string())?;
     w.flush().map_err(|e| e.to_string())?;
     let n_local = res.groups.iter().filter(|g| g.kind == gliph2::convergence::GroupType::Local).count();
+    let assoc = res.association.map_or(String::new(), |s| {
+        format!(
+            ",\"n_case\":{},\"n_control\":{},\"assoc_tested\":{},\"assoc_q05\":{}",
+            s.n_case, s.n_control, s.tested, s.significant_q05
+        )
+    });
     println!(
-        "{{\"rows\":{},\"unique\":{},\"sample\":{},\"reference\":{},\"threads\":{},\"motifs\":{},\"local_groups\":{},\"global_groups\":{},\"t_io\":{:.4},\"t_gliph2\":{:.4},\"t_total\":{:.4}}}",
+        "{{\"rows\":{},\"unique\":{},\"sample\":{},\"reference\":{},\"threads\":{},\"motifs\":{},\"local_groups\":{},\"global_groups\":{},\"t_io\":{:.4},\"t_gliph2\":{:.4},\"t_total\":{:.4}{}}}",
         rep.rows.len(),
         rep.len(),
         res.n_sample,
@@ -198,7 +227,8 @@ fn gliph2_cmd(a: &Args) -> Result<(), String> {
         res.groups.len() - n_local,
         t_io.as_secs_f64(),
         t_run.as_secs_f64(),
-        wall.elapsed().as_secs_f64()
+        wall.elapsed().as_secs_f64(),
+        assoc
     );
     Ok(())
 }

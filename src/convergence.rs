@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use rayon::prelude::*;
 
-use crate::enrichment::{benjamini_hochberg, hypergeom_upper, LogFactorial};
+use crate::enrichment::{benjamini_hochberg, fisher_greater, hypergeom_upper, LogFactorial};
 use crate::io::{Repertoire, SequenceId, NA};
 use crate::motif::Kmer;
 
@@ -65,6 +65,58 @@ pub struct Gliph2Params {
     /// Keep only groups whose members come from at least this many distinct
     /// subjects (0 or 1 disables). Members without a subject don't count.
     pub min_subjects: usize,
+    /// Test each group for enrichment in donors of one condition over
+    /// another (e.g. CMV+ vs CMV−).
+    pub association: Option<Association>,
+}
+
+/// Donor-level association test. A subject's condition is the text after the
+/// last `:` of its GLIPH2 `subject:condition` field (e.g. `HIP00110:CMV+`);
+/// subjects with any other condition are ignored.
+///
+/// For each group, a one-sided Fisher's exact test compares case donors with
+/// at least one member CDR3 against control donors with one, given the total
+/// case and control donors in the input. Only groups present in at least
+/// `min_donors` case or control donors are tested: a group's total donor
+/// count carries no information about the labels, so this filter keeps the
+/// test valid while sparing millions of tests that could never reach
+/// significance. Benjamini–Hochberg q-values are taken over the tested groups.
+#[derive(Debug, Clone)]
+pub struct Association {
+    pub case: String,
+    pub control: String,
+    pub min_donors: usize,
+    /// Keep only tested groups with association p `≤` this.
+    pub max_p: Option<f64>,
+    /// Keep only tested groups with association q `≤` this.
+    pub max_q: Option<f64>,
+    /// Shuffle case/control labels among labelled subjects with this seed
+    /// (keeping the counts) — a negative control for calibration.
+    pub permute_seed: Option<u64>,
+}
+
+impl Association {
+    pub fn new(case: &str, control: &str) -> Self {
+        Association {
+            case: case.to_owned(),
+            control: control.to_owned(),
+            min_donors: 10,
+            max_p: None,
+            max_q: None,
+            permute_seed: None,
+        }
+    }
+}
+
+/// Totals for an association run.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AssocSummary {
+    pub n_case: u32,
+    pub n_control: u32,
+    /// Groups with at least `min_donors` labelled donors.
+    pub tested: usize,
+    /// Tested groups with q ≤ 0.05, counted before any filter is applied.
+    pub significant_q05: usize,
 }
 
 impl Default for Gliph2Params {
@@ -87,6 +139,7 @@ impl Default for Gliph2Params {
             global_max_p: None,
             global_max_q: None,
             min_subjects: 0,
+            association: None,
         }
     }
 }
@@ -162,6 +215,12 @@ pub struct ConvergenceGroup {
     pub q_value: f64,
     /// Distinct subjects among the members' input rows.
     pub n_subjects: u32,
+    /// Case / control donors with a member CDR3 (association runs only).
+    pub case_donors: u32,
+    pub control_donors: u32,
+    /// Association p- and q-value; NaN if not tested.
+    pub assoc_p: f64,
+    pub assoc_q: f64,
     /// Member sequence ids, sorted by CDR3 string.
     pub members: Vec<SequenceId>,
 }
@@ -209,6 +268,7 @@ pub struct Gliph2Result {
     /// Size of the filtered sample (unique C…F CDR3s of sufficient length).
     pub n_sample: usize,
     pub n_reference: usize,
+    pub association: Option<AssocSummary>,
 }
 
 /// `as.numeric(formatC(p, digits = 1, format = "e"))`: two significant figures.
@@ -312,7 +372,7 @@ pub fn gliph2(rep: &Repertoire, reference: &[Vec<u8>], p: &Gliph2Params) -> Glip
         result.groups.extend(global_groups(rep, &working, &ref_unique, p, &lf));
     }
     result.groups.retain(|g| g.cluster_size as usize >= p.cluster_min_size);
-    annotate_and_filter(rep, &mut result.groups, p);
+    result.association = annotate_and_filter(rep, &mut result.groups, p);
     result
 }
 
@@ -425,6 +485,10 @@ fn local_groups(
                     fisher_score: round_2sig(fisher(n, m.num_in_ref)),
                     q_value: f64::NAN,
                     n_subjects: 0,
+                    case_donors: 0,
+                    control_donors: 0,
+                    assoc_p: f64::NAN,
+                    assoc_q: f64::NAN,
                     members,
                 }
             })
@@ -579,13 +643,50 @@ fn global_components(
             fisher_score,
             q_value: f64::NAN,
             n_subjects: 0,
+            case_donors: 0,
+            control_donors: 0,
+            assoc_p: f64::NAN,
+            assoc_q: f64::NAN,
             members: ms,
         });
     }
 }
 
-/// Fills in q-values and subject counts, then applies the optional filters.
-fn annotate_and_filter(rep: &Repertoire, groups: &mut Vec<ConvergenceGroup>, p: &Gliph2Params) {
+/// Subject classes for an association test: 1 = case, 2 = control, 0 = other.
+fn subject_classes(rep: &Repertoire, a: &Association) -> Vec<u8> {
+    let mut classes: Vec<u8> = rep
+        .subjects
+        .names
+        .iter()
+        .map(|name| {
+            let cond = name.rsplit_once(':').map_or("", |(_, c)| c);
+            if cond == a.case {
+                1
+            } else if cond == a.control {
+                2
+            } else {
+                0
+            }
+        })
+        .collect();
+    if let Some(seed) = a.permute_seed {
+        // Fisher–Yates over the labelled subjects only.
+        let labelled: Vec<usize> = (0..classes.len()).filter(|&i| classes[i] != 0).collect();
+        let mut vals: Vec<u8> = labelled.iter().map(|&i| classes[i]).collect();
+        let mut rng = crate::synthetic::Rng::new(seed);
+        for i in (1..vals.len()).rev() {
+            vals.swap(i, rng.below(i + 1));
+        }
+        for (&i, v) in labelled.iter().zip(vals) {
+            classes[i] = v;
+        }
+    }
+    classes
+}
+
+/// Fills in q-values, donor counts and (optionally) association statistics,
+/// then applies the optional filters.
+fn annotate_and_filter(rep: &Repertoire, groups: &mut Vec<ConvergenceGroup>, p: &Gliph2Params) -> Option<AssocSummary> {
     for kind in [GroupType::Local, GroupType::Global] {
         let idx: Vec<usize> = (0..groups.len()).filter(|&i| groups[i].kind == kind).collect();
         // NaN p-values (impossible tables) are treated as 1 for ranking.
@@ -594,29 +695,75 @@ fn annotate_and_filter(rep: &Repertoire, groups: &mut Vec<ConvergenceGroup>, p: 
             groups[i].q_value = q;
         }
     }
+    let classes = p.association.as_ref().map(|a| subject_classes(rep, a));
     groups.par_iter_mut().for_each(|g| {
         let mut subjects: Vec<u32> =
             g.members.iter().flat_map(|&m| rep.rows_of(m).iter().map(|r| r.subject)).filter(|&s| s != NA).collect();
         subjects.sort_unstable();
         subjects.dedup();
         g.n_subjects = subjects.len() as u32;
+        if let Some(cls) = &classes {
+            g.case_donors = subjects.iter().filter(|&&s| cls[s as usize] == 1).count() as u32;
+            g.control_donors = subjects.iter().filter(|&&s| cls[s as usize] == 2).count() as u32;
+        }
     });
+
+    let summary = p.association.as_ref().zip(classes.as_ref()).map(|(a, cls)| {
+        let n_case = cls.iter().filter(|&&c| c == 1).count() as u64;
+        let n_control = cls.iter().filter(|&&c| c == 2).count() as u64;
+        let lf = LogFactorial::new((n_case + n_control) as usize + 1);
+        let tested: Vec<usize> = (0..groups.len())
+            .filter(|&i| (groups[i].case_donors + groups[i].control_donors) as usize >= a.min_donors.max(1))
+            .collect();
+        let pv: Vec<f64> = tested
+            .par_iter()
+            .map(|&i| {
+                let (x, y) = (groups[i].case_donors as u64, groups[i].control_donors as u64);
+                fisher_greater(x, n_case - x, y, n_control - y, &lf)
+            })
+            .collect();
+        let qv = benjamini_hochberg(&pv);
+        for ((&i, &pp), &qq) in tested.iter().zip(&pv).zip(&qv) {
+            groups[i].assoc_p = pp;
+            groups[i].assoc_q = qq;
+        }
+        AssocSummary {
+            n_case: n_case as u32,
+            n_control: n_control as u32,
+            tested: tested.len(),
+            significant_q05: qv.iter().filter(|&&q| q <= 0.05).count(),
+        }
+    });
+
     let keep: Vec<bool> = groups
         .par_iter()
         .map(|g| {
             let global_ok = g.kind != GroupType::Global
                 || (p.global_max_p.is_none_or(|t| g.fisher_score <= t) && p.global_max_q.is_none_or(|t| g.q_value <= t));
-            global_ok && (p.min_subjects <= 1 || g.n_subjects as usize >= p.min_subjects)
+            let assoc_ok = p
+                .association
+                .as_ref()
+                .is_none_or(|a| a.max_p.is_none_or(|t| g.assoc_p <= t) && a.max_q.is_none_or(|t| g.assoc_q <= t));
+            global_ok && assoc_ok && (p.min_subjects <= 1 || g.n_subjects as usize >= p.min_subjects)
         })
         .collect();
     let mut k = keep.into_iter();
     groups.retain(|_| k.next().unwrap());
+    summary
 }
 
 /// Writes groups in turboGliph's `cluster_properties` layout (scores
 /// omitted); `members` is space-separated, sorted CDR3s.
-pub fn write_groups(w: &mut impl std::io::Write, rep: &Repertoire, groups: &[ConvergenceGroup]) -> std::io::Result<()> {
-    writeln!(w, "type\ttag\tcluster_size\tunique_cdr3_sample\tunique_cdr3_ref\tOvE\tfisher.score\tfdr.q\tn_subjects\tmembers")?;
+/// With `association`, four columns (case_donors, control_donors, assoc.p,
+/// assoc.q) precede `members`.
+pub fn write_groups(
+    w: &mut impl std::io::Write,
+    rep: &Repertoire,
+    groups: &[ConvergenceGroup],
+    association: bool,
+) -> std::io::Result<()> {
+    let extra = if association { "\tcase_donors\tcontrol_donors\tassoc.p\tassoc.q" } else { "" };
+    writeln!(w, "type\ttag\tcluster_size\tunique_cdr3_sample\tunique_cdr3_ref\tOvE\tfisher.score\tfdr.q\tn_subjects{extra}\tmembers")?;
     for g in groups {
         write!(
             w,
@@ -631,6 +778,9 @@ pub fn write_groups(w: &mut impl std::io::Write, rep: &Repertoire, groups: &[Con
             g.q_value,
             g.n_subjects
         )?;
+        if association {
+            write!(w, "{}\t{}\t{:e}\t{:e}\t", g.case_donors, g.control_donors, g.assoc_p, g.assoc_q)?;
+        }
         for (i, &m) in g.members.iter().enumerate() {
             if i > 0 {
                 w.write_all(b" ")?;
@@ -756,6 +906,55 @@ mod tests {
         assert!(g.q_value >= g.fisher_score);
         assert_eq!(tags(&Gliph2Params { min_subjects: 2, ..base.clone() }), vec!["G%ETQ_LPQ"]);
         assert_eq!(tags(&Gliph2Params { global_max_p: Some(0.05), ..base.clone() }), vec!["W%WWW_AC"]);
+    }
+
+    #[test]
+    fn association_finds_case_enriched_groups() {
+        let rec = |cdr3: &str, subj: String| crate::io::TcrRecord {
+            cdr3: cdr3.as_bytes().to_vec(),
+            v_gene: None,
+            j_gene: None,
+            subject: Some(subj),
+            count: 1,
+        };
+        let case = |i: usize| format!("D{i}:CMV+");
+        let ctrl = |i: usize| format!("D{}:CMV-", i + 6);
+        let mut records = Vec::new();
+        // G%ETQ: carried by all 6 case donors and no control donor.
+        for i in 0..3 {
+            records.push(rec("CASGQETQYQF", case(i)));
+            records.push(rec("CASGPETQYQF", case(i + 3)));
+        }
+        // W%WWW: 3 case donors, 3 control donors.
+        for i in 0..3 {
+            records.push(rec("CASWAWWWYQF", case(i)));
+            records.push(rec("CASWCWWWYQF", ctrl(i)));
+        }
+        // An unlabelled donor and an unrelated control-only sequence.
+        records.push(rec("CASWAWWWYQF", "D99:CMVNA".into()));
+        for i in 3..6 {
+            records.push(rec("CASSLKKKYQF", ctrl(i)));
+        }
+        let r = Repertoire::from_records(records);
+        let assoc = Association { min_donors: 2, ..Association::new("CMV+", "CMV-") };
+        let p = Gliph2Params { local: false, all_aa_interchangeable: true, association: Some(assoc.clone()), ..Default::default() };
+        // Permuting labels keeps the totals.
+        let perm = Gliph2Params { association: Some(Association { permute_seed: Some(7), ..assoc.clone() }), ..p.clone() };
+        let ps = gliph2(&r, &[], &perm).association.unwrap();
+        assert_eq!((ps.n_case, ps.n_control), (6, 6));
+        let res = gliph2(&r, &[], &p);
+        let s = res.association.unwrap();
+        assert_eq!((s.n_case, s.n_control), (6, 6));
+        let get = |tag: &str| res.groups.iter().find(|g| g.tag(&r) == tag).unwrap().clone();
+        let a = get("G%ETQ_PQ");
+        assert_eq!((a.case_donors, a.control_donors), (6, 0));
+        assert!((a.assoc_p - 1.0 / 924.0).abs() < 1e-12, "{}", a.assoc_p); // 1 / choose(12, 6)
+        let b = get("W%WWW_AC");
+        assert_eq!((b.case_donors, b.control_donors, b.n_subjects), (3, 3, 7));
+        assert!(b.assoc_p > 0.5);
+        let strict = Gliph2Params { association: Some(Association { max_p: Some(0.01), ..assoc }), ..p.clone() };
+        let kept: Vec<String> = gliph2(&r, &[], &strict).groups.iter().map(|g| g.tag(&r)).collect();
+        assert_eq!(kept, vec!["G%ETQ_PQ"]);
     }
 
     #[test]

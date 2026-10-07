@@ -127,6 +127,17 @@ Times are for the paper settings; gliph2-rs times include reading the input and 
 
 **Reproducibility:** repeated runs produce byte-identical output at any thread count.
 
+### CMV association on the full cohort
+
+`gliph2 --case CMV+ --control CMV-` tests every convergence group for enrichment in CMV-seropositive donors (one-sided Fisher at the donor level, Benjamini–Hochberg over groups seen in at least 10 labelled donors). On the pooled Emerson cohort (340 CMV+, 421 CMV− donors; [`hpc/cmv_association.sbatch`](hpc/cmv_association.sbatch)):
+
+- 12.1M groups tested, **57 CMV-associated at q ≤ 0.05**, forming 18 independent CDR3 families. With CMV labels shuffled among donors, **0** groups pass.
+- The strongest families are carried almost only by CMV+ donors, e.g. `SIGPLEHNE` in 42 CMV+ and 0 CMV− donors (p = 4.5×10⁻¹⁶).
+- **7 of 18 families are HLA-restricted** (q ≤ 0.05, 626 HLA-typed donors). The one family VDJdb links to a CMV epitope, `SLIGVSSYNE` (pp65 TPRVTGGGAM, presented by HLA-B*07:02), is carried by HLA-B*07 donors 83% of the time against 21% overall (q = 9×10⁻¹³). Others are restricted by HLA-A*01, A*24 and B*08, alleles that present well-known CMV epitopes.
+- VDJdb alone cannot confirm specificity: associated groups are equally enriched for CMV and other-virus entries (22.5× vs 22.6×, size-matched), and VDJdb covers few CMV epitopes.
+
+Results: [`hpc/results/cmv-10881270_*`](hpc/results/).
+
 Not yet compared: turboGliph's simulation-based cluster scores (network size, CDR3 length, V gene, clonal expansion, HLA).
 
 ## Roadmap
@@ -142,7 +153,7 @@ Not yet compared: turboGliph's simulation-based cluster scores (network size, CD
 - [x] GLIPH2 convergence groups, validated against turboGliph on real data
 - [x] Full-cohort run (Emerson 2017, 151M rows)
 - [x] Per-group q-values, donor counts and opt-in global-group filters
-- [ ] Donor-label association (e.g. CMV+ vs CMV− donors) for cohort-scale filtering
+- [x] Donor-label association (CMV+ vs CMV−), with permutation, VDJdb and HLA checks
 - [ ] Cluster scoring (network size, CDR3 length, V gene, clonal expansion, HLA)
 - [ ] R binding (extendr)
 - [ ] Python binding (PyO3)

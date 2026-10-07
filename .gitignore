@@ -1,3 +1,4 @@
 /target
 /hpc/out
 *.tsv.gz
+__pycache__/
