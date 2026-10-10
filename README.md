@@ -58,21 +58,24 @@ gliph2-rs/
 │   └── main.rs              # `gliph2-rs` CLI
 ├── hpc/                     # Slurm jobs, data setup, validation vs. turboGliph
 ├── bindings/
-│   ├── r/                   # extendr wrapper
-│   └── python/              # PyO3 wrapper (optional)
+│   ├── r/                   # extendr wrapper (the `gliph2rs` R package)
+│   └── python/              # PyO3 wrapper (planned)
 └── benches/
     └── vs_gliph2.rs
 ```
 
-### Planned API
+### R binding
 
-The R binding (via `extendr`) is meant to slot into existing GLIPH2 / turboGliph workflows:
+[`bindings/r`](bindings/r/) is an R package (`gliph2rs`, via `extendr`) that slots into existing GLIPH2 / turboGliph workflows:
 
 ```r
-local    <- local_cluster(cdr3)
-motifs   <- motif_enrich(cdr3, reference)
-clusters <- assemble_clusters(local, motifs)
+remotes::install_github("mayankgandhi13/gliph2-rs", subdir = "bindings/r")
+
+res <- gliph2rs::gliph2(my_tcrs, refdb_beta = ref_CD48)
+head(res$cluster_properties)
 ```
+
+It returns the same groups as `turboGliph::gliph2()`, with `cluster_properties`, `selected_motifs` and `cluster_list` elements, plus the donor-association columns. See [its README](bindings/r/README.md).
 
 A PyO3 binding is planned for comparison against Python tools like clusTCR and GIANA.
 
@@ -155,7 +158,7 @@ Not yet compared: turboGliph's simulation-based cluster scores (network size, CD
 - [x] Per-group q-values, donor counts and opt-in global-group filters
 - [x] Donor-label association (CMV+ vs CMV−), with permutation, VDJdb and HLA checks
 - [ ] Cluster scoring (network size, CDR3 length, V gene, clonal expansion, HLA)
-- [ ] R binding (extendr)
+- [x] R binding (extendr), matching turboGliph group for group
 - [ ] Python binding (PyO3)
 - [ ] Write-up of results
 

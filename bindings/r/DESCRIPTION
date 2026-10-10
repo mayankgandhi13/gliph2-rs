@@ -1,0 +1,23 @@
+Package: gliph2rs
+Title: Fast GLIPH2 Convergence Groups for TCR Repertoires
+Version: 0.1.0
+Authors@R:
+    person("Mayank", "Gandhi", email = "gandhi.may@northeastern.edu", role = c("aut", "cre"))
+Author: Mayank Gandhi [aut, cre]
+Maintainer: Mayank Gandhi <gandhi.may@northeastern.edu>
+Description: Groups T-cell receptor CDR3 beta sequences that are predicted to
+    share antigen specificity, following the GLIPH2 method of Huang et al.
+    (2020) <doi:10.1038/s41587-020-0505-4>. Group membership matches
+    'turboGliph' exactly, while the computation runs in parallel Rust and
+    scales to pooled cohorts of 100 million sequences. Also tests groups for
+    association with a donor condition, such as cytomegalovirus serostatus.
+License: MIT + file LICENSE
+Encoding: UTF-8
+SystemRequirements: Cargo (Rust's package manager), rustc
+Depends: R (>= 4.1.0)
+Imports: stats
+Suggests: testthat (>= 3.0.0)
+Config/testthat/edition: 3
+URL: https://github.com/mayankgandhi13/gliph2-rs
+BugReports: https://github.com/mayankgandhi13/gliph2-rs/issues
+Config/roxygen2/version: 8.1.0

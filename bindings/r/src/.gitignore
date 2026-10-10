@@ -1,0 +1,5 @@
+rust/target
+.cargo
+*.o
+*.so
+*.a

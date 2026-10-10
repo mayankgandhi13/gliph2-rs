@@ -2,3 +2,5 @@
 /hpc/out
 *.tsv.gz
 __pycache__/
+bindings/*.tar.gz
+bindings/*.Rcheck/

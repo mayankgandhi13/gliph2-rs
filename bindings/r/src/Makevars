@@ -1,0 +1,42 @@
+TARGET_DIR = ./rust/target
+LIBDIR = $(TARGET_DIR)/release
+STATLIB = $(LIBDIR)/libgliph2rs.a
+PKG_LIBS = -L$(LIBDIR) -lgliph2rs
+
+# The core crate is vendored into rust/gliph2-rs so the package is
+# self-contained. Installing from a repository checkout copies it in; a
+# source tarball already ships it.
+VENDOR = ./rust/core
+CORE = $(CURDIR)/../../..
+
+all: C_clean
+
+$(SHLIB): $(STATLIB)
+
+CARGOTMP = $(CURDIR)/.cargo
+
+$(VENDOR)/Cargo.toml:
+	if [ -f "$(CORE)/Cargo.toml" ]; then 		mkdir -p $(VENDOR) && 		cp "$(CORE)/Cargo.toml" $(VENDOR)/Cargo.toml && 		rm -Rf $(VENDOR)/src && cp -R "$(CORE)/src" $(VENDOR)/src; 	else 		echo "ERROR: core crate not found at $(CORE) and not vendored in $(VENDOR)" >&2; 		exit 1; 	fi
+
+$(STATLIB): $(VENDOR)/Cargo.toml
+	if [ "$(NOT_CRAN)" != "true" ]; then \
+		export CARGO_HOME=$(CARGOTMP); \
+	fi && \
+		export PATH="$(PATH):$(HOME)/.cargo/bin" && \
+		cargo build --lib --release --manifest-path=./rust/Cargo.toml --target-dir $(TARGET_DIR)
+	if [ "$(NOT_CRAN)" != "true" ]; then \
+		rm -Rf $(CARGOTMP) && \
+		rm -Rf $(LIBDIR)/build; \
+	fi
+
+C_clean:
+	rm -Rf $(SHLIB) $(OBJECTS) $(STATLIB)
+
+# $(VENDOR) is deliberately not removed here: R CMD build runs this target on
+# its temporary copy of the package, and the vendored crate must survive into
+# the tarball. Use `make distclean` to drop it from a working tree.
+clean:
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rust/target
+
+distclean: clean
+	rm -Rf $(VENDOR)

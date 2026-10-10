@@ -1,0 +1,20 @@
+[workspace]
+
+[package]
+name = "gliph2rs"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+name = "gliph2rs"
+
+[dependencies]
+extendr-api = "0.9"
+gliph2-rs = { path = "core" }
+rayon = "1.10"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

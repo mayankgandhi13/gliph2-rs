@@ -1,0 +1,5 @@
+^src/rust/target$
+^src/\.cargo$
+\.o$
+\.so$
+\.a$

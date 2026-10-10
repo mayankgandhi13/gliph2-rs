@@ -1,0 +1,17 @@
+[package]
+name = "gliph2-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Fast, deterministic Rust reimplementation of the GLIPH2 TCR clustering core"
+license = "MIT"
+
+[lib]
+name = "gliph2"
+
+[dependencies]
+rayon = "1.10"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
