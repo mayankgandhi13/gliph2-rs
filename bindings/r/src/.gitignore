@@ -3,3 +3,4 @@ rust/target
 *.o
 *.so
 *.a
+rust/core
