@@ -15,7 +15,8 @@
 
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
-export RUSTUP_HOME=/scratch/$USER/rustup CARGO_HOME=/scratch/$USER/cargo
+# shellcheck source=hpc/rust_env.sh
+. hpc/rust_env.sh
 module load miniconda3/25.9.1
 ENV=/scratch/$USER/envs/gliph-r
 export PATH="$CARGO_HOME/bin:$ENV/bin:$PATH"

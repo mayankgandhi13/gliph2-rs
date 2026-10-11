@@ -3,9 +3,7 @@ LIBDIR = $(TARGET_DIR)/release
 STATLIB = $(LIBDIR)/libgliph2rs.a
 PKG_LIBS = -L$(LIBDIR) -lgliph2rs
 
-# The core crate is vendored into rust/gliph2-rs so the package is
-# self-contained. Installing from a repository checkout copies it in; a
-# source tarball already ships it.
+# The core crate is vendored into rust/core so the package is self-contained.
 VENDOR = ./rust/core
 CORE = $(CURDIR)/../../..
 
@@ -15,10 +13,21 @@ $(SHLIB): $(STATLIB)
 
 CARGOTMP = $(CURDIR)/.cargo
 
-$(VENDOR)/Cargo.toml:
-	if [ -f "$(CORE)/Cargo.toml" ]; then 		mkdir -p $(VENDOR) && 		cp "$(CORE)/Cargo.toml" $(VENDOR)/Cargo.toml && 		rm -Rf $(VENDOR)/src && cp -R "$(CORE)/src" $(VENDOR)/src; 	else 		echo "ERROR: core crate not found at $(CORE) and not vendored in $(VENDOR)" >&2; 		exit 1; 	fi
+# Refresh the vendored crate from the repository on every build, so a working
+# tree never compiles stale sources. A source tarball has no repository above
+# the package, and ships the copy instead. `vendor` names no file, so it
+# always runs; no GNU make extensions are used.
+vendor:
+	if [ -f "$(CORE)/Cargo.toml" ]; then \
+		mkdir -p $(VENDOR) && \
+		cp "$(CORE)/Cargo.toml" $(VENDOR)/Cargo.toml && \
+		rm -Rf $(VENDOR)/src && cp -R "$(CORE)/src" $(VENDOR)/src; \
+	elif [ ! -f "$(VENDOR)/Cargo.toml" ]; then \
+		echo "ERROR: core crate missing at $(CORE) and not vendored in $(VENDOR)" >&2; \
+		exit 1; \
+	fi
 
-$(STATLIB): $(VENDOR)/Cargo.toml
+$(STATLIB): vendor
 	if [ "$(NOT_CRAN)" != "true" ]; then \
 		export CARGO_HOME=$(CARGOTMP); \
 	fi && \
@@ -32,11 +41,12 @@ $(STATLIB): $(VENDOR)/Cargo.toml
 C_clean:
 	rm -Rf $(SHLIB) $(OBJECTS) $(STATLIB)
 
-# $(VENDOR) is deliberately not removed here: R CMD build runs this target on
-# its temporary copy of the package, and the vendored crate must survive into
-# the tarball. Use `make distclean` to drop it from a working tree.
+# $(VENDOR) is deliberately kept: R CMD build runs `clean` on its temporary
+# copy of the package, and the vendored crate must survive into the tarball.
 clean:
 	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rust/target
 
 distclean: clean
 	rm -Rf $(VENDOR)
+
+.PHONY: all vendor C_clean clean distclean

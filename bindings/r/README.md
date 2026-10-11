@@ -66,10 +66,26 @@ res <- gliph2(cohort, ref_CD48, case = "CMV+", control = "CMV-",
 This adds `case_donors`, `control_donors`, `assoc.p` and `assoc.q` columns.
 `assoc_permute_seed` shuffles the labels among donors as a calibration control.
 
+### HLA restriction
+
+Pass donor typing as a named list or a data frame of donor + allele columns to
+score each group for HLA restriction:
+
+```r
+res <- gliph2(cohort, ref_CD48, hla = donor_alleles)
+res$cluster_properties[, c("tag", "hla.allele", "hla.with_allele", "hla.donors", "hla.q")]
+```
+
+Each allele among a group's typed carriers is tested against the typed cohort
+(one-sided hypergeometric); the best allele is reported with a q-value
+(Bonferroni within the group, then Benjamini-Hochberg across groups).
+
 ## Differences from turboGliph
 
 - Group membership, tags and Fisher scores match exactly.
-- The simulation-based cluster scores (network size, CDR3 length, V gene, clonal
-  expansion, HLA) are **not** computed, so `total.score` and friends are absent.
+- HLA restriction is scored (see above), deterministically. The four
+  simulation-based cluster scores (network size, CDR3 length, V gene, clonal
+  expansion) are **not** computed, so `total.score` and friends are absent:
+  turboGliph never seeds that RNG, so its values differ between runs.
 - Results are deterministic: repeated calls, and any `n_cores`, give identical
   groups. turboGliph's scores vary between runs because they are simulated.

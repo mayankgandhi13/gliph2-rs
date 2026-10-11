@@ -30,6 +30,7 @@ gliph2(
   assoc_max_p = NULL,
   assoc_max_q = NULL,
   assoc_permute_seed = NULL,
+  hla = NULL,
   n_cores = 0
 )
 }
@@ -90,6 +91,12 @@ association p- or q-value.}
 
 \item{assoc_permute_seed}{Shuffle the case/control labels among donors with
 this seed, as a calibration control.}
+
+\item{hla}{Optional HLA typing per donor: a data frame whose first column
+holds donor names (matching the donor column of `cdr3_sequences`) and
+whose remaining columns hold alleles, or a named list of allele vectors.
+Each group is then scored for HLA restriction, adding `hla.allele`,
+`hla.donors`, `hla.with_allele`, `hla.p` and `hla.q` columns.}
 
 \item{n_cores}{Threads to use; `0` lets Rust choose.}
 }

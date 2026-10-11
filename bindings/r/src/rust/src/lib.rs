@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use extendr_api::prelude::*;
-use gliph2::convergence::{gliph2 as run_gliph2, Association, Gliph2Params};
+use gliph2::convergence::{gliph2 as run_gliph2, Association, Gliph2Params, HlaTable};
 use gliph2::io::{Repertoire, TcrRecord};
 
 /// Runs `f` on a rayon pool of `n` threads (0 = rayon's default). A local
@@ -57,6 +57,10 @@ impl<'a> Params<'a> {
     fn f64_vec(&self, name: &str, default: Vec<f64>) -> Vec<f64> {
         self.0.get(name).and_then(|r| r.as_real_vector()).filter(|v| !v.is_empty()).unwrap_or(default)
     }
+
+    fn str_vec(&self, name: &str) -> Vec<String> {
+        self.0.get(name).and_then(|r| r.as_str_vector()).map_or_else(Vec::new, |v| v.iter().map(|s| s.to_string()).collect())
+    }
 }
 
 fn build_params(p: &Params) -> Gliph2Params {
@@ -79,7 +83,19 @@ fn build_params(p: &Params) -> Gliph2Params {
         global_max_q: p.opt_f64("global_max_q"),
         min_subjects: p.usize("min_subjects", 0),
         association: None,
+        hla: None,
     };
+    // HLA typing arrives as two parallel character vectors.
+    let (donors, alleles) = (p.str_vec("hla_donor"), p.str_vec("hla_allele"));
+    if !donors.is_empty() {
+        let mut by_donor: HashMap<String, Vec<String>> = HashMap::new();
+        for (d, a) in donors.iter().zip(&alleles) {
+            if !d.is_empty() && !a.is_empty() {
+                by_donor.entry(d.clone()).or_default().push(a.clone());
+            }
+        }
+        g.hla = Some(HlaTable { by_donor });
+    }
     if let (Some(case), Some(control)) = (p.str("case"), p.str("control")) {
         g.association = Some(Association {
             case,
@@ -177,6 +193,15 @@ fn gliph2_impl(
         values.push(real(&|x| x.assoc_p));
         values.push(real(&|x| x.assoc_q));
     }
+    if res.hla.is_some() {
+        let alleles = &res.hla_alleles;
+        names.extend(["hla.allele", "hla.donors", "hla.with_allele", "hla.p", "hla.q"]);
+        values.push(text(&|x| alleles.get(x.hla_allele as usize).cloned().unwrap_or_else(|| "NA".to_owned())));
+        values.push(int(&|x| x.hla_donors as i32));
+        values.push(int(&|x| x.hla_with_allele as i32));
+        values.push(real(&|x| x.hla_p));
+        values.push(real(&|x| x.hla_q));
+    }
     // Members as space-separated CDR3s, as turboGliph writes them.
     names.push("members");
     values.push(text(&|x| {
@@ -214,8 +239,22 @@ fn gliph2_impl(
         None => NULL.into(),
     };
 
+    let hla: Robj = match res.hla {
+        Some(s) => columns(
+            &["typed_donors", "scored", "tests", "significant_q05"],
+            vec![
+                (s.typed_donors as i32).into(),
+                (s.scored as f64).into(),
+                (s.tests as f64).into(),
+                (s.significant_q05 as f64).into(),
+            ],
+        )
+        .into(),
+        None => NULL.into(),
+    };
+
     columns(
-        &["groups", "motifs", "n_sample", "n_reference", "n_input_cdr3", "association"],
+        &["groups", "motifs", "n_sample", "n_reference", "n_input_cdr3", "association", "hla"],
         vec![
             groups.into(),
             motifs.into(),
@@ -223,6 +262,7 @@ fn gliph2_impl(
             (res.n_reference as f64).into(),
             (rep.len() as f64).into(),
             assoc,
+            hla,
         ],
     )
 }

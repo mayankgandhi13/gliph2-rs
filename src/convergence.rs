@@ -68,6 +68,26 @@ pub struct Gliph2Params {
     /// Test each group for enrichment in donors of one condition over
     /// another (e.g. CMV+ vs CMV−).
     pub association: Option<Association>,
+    /// Score each group for HLA restriction among its donors.
+    pub hla: Option<HlaTable>,
+}
+
+/// HLA typing per donor, keyed by the donor string used in the input's
+/// `subject:condition` column (e.g. `HIP00110:CMV-`).
+///
+/// Antigen-specific public TCRs are usually restricted by one HLA allele, so
+/// a group whose carriers share an allele far more often than the cohort does
+/// is more likely to be a real specificity group. Each allele seen among a
+/// group's typed carriers gets a one-sided hypergeometric test against the
+/// typed cohort; the best allele is reported. Unlike GLIPH2's other cluster
+/// scores this needs no simulation, so it is exactly reproducible.
+///
+/// GLIPH2 reports the smallest p-value and lists the alleles under
+/// `hla_cutoff`. Reporting the best allele with a q-value says the same thing
+/// while accounting for how many alleles and groups were tried.
+#[derive(Debug, Clone, Default)]
+pub struct HlaTable {
+    pub by_donor: HashMap<String, Vec<String>>,
 }
 
 /// Donor-level association test. A subject's condition is the text after the
@@ -140,6 +160,7 @@ impl Default for Gliph2Params {
             global_max_q: None,
             min_subjects: 0,
             association: None,
+            hla: None,
         }
     }
 }
@@ -221,6 +242,19 @@ pub struct ConvergenceGroup {
     /// Association p- and q-value; NaN if not tested.
     pub assoc_p: f64,
     pub assoc_q: f64,
+    /// Best HLA allele among the group's typed donors: an index into
+    /// [`Gliph2Result::hla_alleles`], or `NA` when not scored.
+    pub hla_allele: u32,
+    /// Typed donors carrying a member CDR3, and how many of them carry
+    /// `hla_allele`.
+    pub hla_donors: u32,
+    pub hla_with_allele: u32,
+    /// Raw hypergeometric p-value of `hla_allele`; NaN if not scored.
+    pub hla_p: f64,
+    /// Benjamini–Hochberg q-value across groups, after a within-group
+    /// Bonferroni correction for the alleles tried in that group. Always at
+    /// least `hla_p`.
+    pub hla_q: f64,
     /// Member sequence ids, sorted by CDR3 string.
     pub members: Vec<SequenceId>,
 }
@@ -269,6 +303,21 @@ pub struct Gliph2Result {
     pub n_sample: usize,
     pub n_reference: usize,
     pub association: Option<AssocSummary>,
+    /// Allele names indexed by [`ConvergenceGroup::hla_allele`].
+    pub hla_alleles: Vec<String>,
+    pub hla: Option<HlaSummary>,
+}
+
+/// Totals for an HLA-scoring run.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HlaSummary {
+    /// Donors in the input that the table has typing for.
+    pub typed_donors: u32,
+    /// Groups with at least two typed carriers, which are the ones scored.
+    pub scored: usize,
+    /// (group, allele) tests behind the q-values.
+    pub tests: usize,
+    pub significant_q05: usize,
 }
 
 /// `as.numeric(formatC(p, digits = 1, format = "e"))`: two significant figures.
@@ -372,7 +421,10 @@ pub fn gliph2(rep: &Repertoire, reference: &[Vec<u8>], p: &Gliph2Params) -> Glip
         result.groups.extend(global_groups(rep, &working, &ref_unique, p, &lf));
     }
     result.groups.retain(|g| g.cluster_size as usize >= p.cluster_min_size);
-    result.association = annotate_and_filter(rep, &mut result.groups, p);
+    let (assoc, hla, alleles) = annotate_and_filter(rep, &mut result.groups, p);
+    result.association = assoc;
+    result.hla = hla;
+    result.hla_alleles = alleles;
     result
 }
 
@@ -489,6 +541,11 @@ fn local_groups(
                     control_donors: 0,
                     assoc_p: f64::NAN,
                     assoc_q: f64::NAN,
+                    hla_allele: NA,
+                    hla_donors: 0,
+                    hla_with_allele: 0,
+                    hla_p: f64::NAN,
+                    hla_q: f64::NAN,
                     members,
                 }
             })
@@ -647,6 +704,11 @@ fn global_components(
             control_donors: 0,
             assoc_p: f64::NAN,
             assoc_q: f64::NAN,
+            hla_allele: NA,
+            hla_donors: 0,
+            hla_with_allele: 0,
+            hla_p: f64::NAN,
+            hla_q: f64::NAN,
             members: ms,
         });
     }
@@ -686,7 +748,99 @@ fn subject_classes(rep: &Repertoire, a: &Association) -> Vec<u8> {
 
 /// Fills in q-values, donor counts and (optionally) association statistics,
 /// then applies the optional filters.
-fn annotate_and_filter(rep: &Repertoire, groups: &mut Vec<ConvergenceGroup>, p: &Gliph2Params) -> Option<AssocSummary> {
+type Annotations = (Option<AssocSummary>, Option<HlaSummary>, Vec<String>);
+
+/// Per-donor allele ids, indexed by subject id, plus the allele names.
+/// Donors absent from the table get an empty list and are not counted.
+fn hla_index(rep: &Repertoire, table: &HlaTable) -> (Vec<Vec<u32>>, Vec<String>) {
+    let mut names: Vec<String> = table.by_donor.values().flatten().cloned().collect();
+    names.sort_unstable();
+    names.dedup();
+    let id: HashMap<&str, u32> = names.iter().enumerate().map(|(i, n)| (n.as_str(), i as u32)).collect();
+    let by_subject = rep
+        .subjects
+        .names
+        .iter()
+        .map(|donor| {
+            let mut v: Vec<u32> =
+                table.by_donor.get(donor).map(|a| a.iter().filter_map(|x| id.get(x.as_str()).copied()).collect()).unwrap_or_default();
+            v.sort_unstable();
+            v.dedup();
+            v
+        })
+        .collect();
+    (by_subject, names)
+}
+
+/// Scores every group for HLA restriction. `donors` holds each group's
+/// distinct subject ids.
+fn score_hla(
+    groups: &mut [ConvergenceGroup],
+    donors: &[Vec<u32>],
+    by_subject: &[Vec<u32>],
+    n_alleles: usize,
+) -> HlaSummary {
+    // Cohort background: typed donors, and how many carry each allele.
+    let typed: Vec<u32> = (0..by_subject.len() as u32).filter(|&s| !by_subject[s as usize].is_empty()).collect();
+    let mut background = vec![0u64; n_alleles];
+    for &s in &typed {
+        for &a in &by_subject[s as usize] {
+            background[a as usize] += 1;
+        }
+    }
+    let n_typed = typed.len() as u64;
+    let lf = LogFactorial::new(n_typed as usize + 1);
+
+    // Per group: the best allele by p-value, ties broken by allele id so the
+    // result does not depend on iteration order.
+    let scored: Vec<(usize, u32, u32, u32, f64, usize)> = groups
+        .par_iter()
+        .enumerate()
+        .filter_map(|(i, _)| {
+            let carriers: Vec<u32> = donors[i].iter().copied().filter(|&s| !by_subject[s as usize].is_empty()).collect();
+            if carriers.len() < 2 {
+                return None;
+            }
+            let mut counts: HashMap<u32, u64> = HashMap::new();
+            for &s in &carriers {
+                for &a in &by_subject[s as usize] {
+                    *counts.entry(a).or_insert(0) += 1;
+                }
+            }
+            let k = carriers.len() as u64;
+            let mut best: Option<(f64, u32, u64)> = None;
+            for (&allele, &a) in &counts {
+                let m = background[allele as usize];
+                let pv = hypergeom_upper(a, m, n_typed - m, k, &lf);
+                if best.is_none_or(|(bp, ba, _)| (pv, allele) < (bp, ba)) {
+                    best = Some((pv, allele, a));
+                }
+            }
+            best.map(|(pv, allele, a)| (i, allele, k as u32, a as u32, pv, counts.len()))
+        })
+        .collect();
+
+    // The reported p is the smallest of the alleles tried in that group, so
+    // correct within the group (Bonferroni) before correcting across groups.
+    let adjusted: Vec<f64> = scored.iter().map(|x| (x.4 * x.5 as f64).min(1.0)).collect();
+    let n_tests: usize = scored.iter().map(|x| x.5).sum();
+    let qv = benjamini_hochberg(&adjusted);
+    let mut significant = 0;
+    for ((i, allele, k, a, p, _), &q) in scored.iter().zip(&qv) {
+        let g = &mut groups[*i];
+        g.hla_allele = *allele;
+        g.hla_donors = *k;
+        g.hla_with_allele = *a;
+        g.hla_p = *p;
+        g.hla_q = q;
+        if q <= 0.05 {
+            significant += 1;
+        }
+    }
+    HlaSummary { typed_donors: n_typed as u32, scored: scored.len(), tests: n_tests, significant_q05: significant }
+}
+
+fn annotate_and_filter(rep: &Repertoire, groups: &mut Vec<ConvergenceGroup>, p: &Gliph2Params) -> Annotations {
     for kind in [GroupType::Local, GroupType::Global] {
         let idx: Vec<usize> = (0..groups.len()).filter(|&i| groups[i].kind == kind).collect();
         // NaN p-values (impossible tables) are treated as 1 for ranking.
@@ -696,17 +850,30 @@ fn annotate_and_filter(rep: &Repertoire, groups: &mut Vec<ConvergenceGroup>, p: 
         }
     }
     let classes = p.association.as_ref().map(|a| subject_classes(rep, a));
-    groups.par_iter_mut().for_each(|g| {
-        let mut subjects: Vec<u32> =
-            g.members.iter().flat_map(|&m| rep.rows_of(m).iter().map(|r| r.subject)).filter(|&s| s != NA).collect();
-        subjects.sort_unstable();
-        subjects.dedup();
-        g.n_subjects = subjects.len() as u32;
-        if let Some(cls) = &classes {
-            g.case_donors = subjects.iter().filter(|&&s| cls[s as usize] == 1).count() as u32;
-            g.control_donors = subjects.iter().filter(|&&s| cls[s as usize] == 2).count() as u32;
+    let donors: Vec<Vec<u32>> = groups
+        .par_iter_mut()
+        .map(|g| {
+            let mut subjects: Vec<u32> =
+                g.members.iter().flat_map(|&m| rep.rows_of(m).iter().map(|r| r.subject)).filter(|&s| s != NA).collect();
+            subjects.sort_unstable();
+            subjects.dedup();
+            g.n_subjects = subjects.len() as u32;
+            if let Some(cls) = &classes {
+                g.case_donors = subjects.iter().filter(|&&s| cls[s as usize] == 1).count() as u32;
+                g.control_donors = subjects.iter().filter(|&&s| cls[s as usize] == 2).count() as u32;
+            }
+            subjects
+        })
+        .collect();
+
+    let (hla_summary, hla_alleles) = match &p.hla {
+        Some(table) => {
+            let (by_subject, names) = hla_index(rep, table);
+            let n = names.len();
+            (Some(score_hla(groups, &donors, &by_subject, n)), names)
         }
-    });
+        None => (None, Vec::new()),
+    };
 
     let summary = p.association.as_ref().zip(classes.as_ref()).map(|(a, cls)| {
         let n_case = cls.iter().filter(|&&c| c == 1).count() as u64;
@@ -749,22 +916,25 @@ fn annotate_and_filter(rep: &Repertoire, groups: &mut Vec<ConvergenceGroup>, p: 
         .collect();
     let mut k = keep.into_iter();
     groups.retain(|_| k.next().unwrap());
-    summary
+    (summary, hla_summary, hla_alleles)
 }
 
 /// Writes groups in turboGliph's `cluster_properties` layout (scores
 /// omitted); `members` is space-separated, sorted CDR3s.
-/// With `association`, four columns (case_donors, control_donors, assoc.p,
-/// assoc.q) precede `members`.
-pub fn write_groups(
-    w: &mut impl std::io::Write,
-    rep: &Repertoire,
-    groups: &[ConvergenceGroup],
-    association: bool,
-) -> std::io::Result<()> {
-    let extra = if association { "\tcase_donors\tcontrol_donors\tassoc.p\tassoc.q" } else { "" };
-    writeln!(w, "type\ttag\tcluster_size\tunique_cdr3_sample\tunique_cdr3_ref\tOvE\tfisher.score\tfdr.q\tn_subjects{extra}\tmembers")?;
-    for g in groups {
+/// Association and HLA columns appear only when those were computed.
+pub fn write_groups(w: &mut impl std::io::Write, rep: &Repertoire, res: &Gliph2Result) -> std::io::Result<()> {
+    let association = res.association.is_some();
+    let hla = res.hla.is_some();
+    let mut header =
+        String::from("type\ttag\tcluster_size\tunique_cdr3_sample\tunique_cdr3_ref\tOvE\tfisher.score\tfdr.q\tn_subjects");
+    if association {
+        header.push_str("\tcase_donors\tcontrol_donors\tassoc.p\tassoc.q");
+    }
+    if hla {
+        header.push_str("\thla.allele\thla.donors\thla.with_allele\thla.p\thla.q");
+    }
+    writeln!(w, "{header}\tmembers")?;
+    for g in &res.groups {
         write!(
             w,
             "{}\t{}\t{}\t{}\t{}\t{}\t{:e}\t{:e}\t{}\t",
@@ -780,6 +950,10 @@ pub fn write_groups(
         )?;
         if association {
             write!(w, "{}\t{}\t{:e}\t{:e}\t", g.case_donors, g.control_donors, g.assoc_p, g.assoc_q)?;
+        }
+        if hla {
+            let allele = res.hla_alleles.get(g.hla_allele as usize).map_or("NA", String::as_str);
+            write!(w, "{}\t{}\t{}\t{:e}\t{:e}\t", allele, g.hla_donors, g.hla_with_allele, g.hla_p, g.hla_q)?;
         }
         for (i, &m) in g.members.iter().enumerate() {
             if i > 0 {
@@ -955,6 +1129,51 @@ mod tests {
         let strict = Gliph2Params { association: Some(Association { max_p: Some(0.01), ..assoc }), ..p.clone() };
         let kept: Vec<String> = gliph2(&r, &[], &strict).groups.iter().map(|g| g.tag(&r)).collect();
         assert_eq!(kept, vec!["G%ETQ_PQ"]);
+    }
+
+    #[test]
+    fn hla_scoring_finds_the_restricting_allele() {
+        // 20 donors: group carriers D1-D5 all carry A*01; 5 of the other 15
+        // do too. B*07 is spread evenly, so it should not win.
+        let rec = |cdr3: &str, subj: &str| crate::io::TcrRecord {
+            cdr3: cdr3.as_bytes().to_vec(),
+            v_gene: None,
+            j_gene: None,
+            subject: Some(subj.to_string()),
+            count: 1,
+        };
+        let mut records = Vec::new();
+        for i in 1..=5 {
+            records.push(rec("CASGIETQYQF", &format!("D{i}")));
+            records.push(rec("CASGVETQYQF", &format!("D{i}")));
+        }
+        for i in 6..=20 {
+            records.push(rec(&format!("CASSL{}KKYEQYF", b"ACDEFGHIKLMNPQR"[i - 6] as char), &format!("D{i}")));
+        }
+        let r = Repertoire::from_records(records);
+        let mut by_donor: HashMap<String, Vec<String>> = HashMap::new();
+        for i in 1..=20 {
+            let mut alleles = vec![if i % 2 == 0 { "HLA-B*07" } else { "HLA-B*08" }.to_string()];
+            if i <= 10 {
+                alleles.push("HLA-A*01".to_string());
+            }
+            by_donor.insert(format!("D{i}"), alleles);
+        }
+        let p = Gliph2Params {
+            local: false,
+            hla: Some(HlaTable { by_donor }),
+            ..Default::default()
+        };
+        let res = gliph2(&r, &[], &p);
+        let s = res.hla.unwrap();
+        assert_eq!(s.typed_donors, 20);
+        let g = res.groups.iter().find(|g| g.tag(&r) == "G%ETQ_IV").unwrap();
+        assert_eq!(res.hla_alleles[g.hla_allele as usize], "HLA-A*01");
+        assert_eq!((g.hla_donors, g.hla_with_allele), (5, 5));
+        // phyper(4, 10, 10, 5, lower.tail = FALSE) = choose(10,5)/choose(20,5)
+        let expect = 252.0 / 15504.0;
+        assert!((g.hla_p - expect).abs() < 1e-12, "{} vs {expect}", g.hla_p);
+        assert!(g.hla_q >= g.hla_p);
     }
 
     #[test]

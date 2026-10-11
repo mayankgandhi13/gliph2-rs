@@ -95,3 +95,38 @@ test_that("bad input is rejected", {
   expect_error(gliph2(c("CASSLGQETQYF"), reference, case = "CMV+"), "together")
   expect_error(gliph2(data.frame(x = 1), reference), "CDR3b")
 })
+
+test_that("HLA scoring finds the restricting allele", {
+  # Carriers D1-D5 all carry A*01; 5 of the other 15 donors do too.
+  input <- data.frame(
+    CDR3b = c(rep(c("CASGIETQYQF", "CASGVETQYQF"), 5),
+              paste0("CASSL", strsplit("ACDEFGHIKLMNPQR", "")[[1]], "KKYEQYF")),
+    patient = c(rep(paste0("D", 1:5), each = 2), paste0("D", 6:20)),
+    stringsAsFactors = FALSE
+  )
+  typing <- lapply(1:20, function(i) {
+    c(if (i %% 2 == 0) "HLA-B*07" else "HLA-B*08", if (i <= 10) "HLA-A*01")
+  })
+  names(typing) <- paste0("D", 1:20)
+
+  res <- gliph2(input, reference, local_similarities = FALSE, hla = typing)
+  expect_equal(res$hla$typed_donors, 20)
+
+  g <- res$cluster_properties[res$cluster_properties$tag == "G%ETQ_IV", ]
+  expect_equal(g$hla.allele, "HLA-A*01")
+  expect_equal(c(g$hla.donors, g$hla.with_allele), c(5, 5))
+  expect_equal(g$hla.p, phyper(4, 10, 10, 5, lower.tail = FALSE))
+  expect_gte(g$hla.q, g$hla.p)
+
+  # A data frame of donor + allele columns is equivalent to the named list.
+  frame <- data.frame(
+    donor = names(typing),
+    a1 = vapply(typing, `[`, character(1), 1),
+    a2 = vapply(typing, function(x) if (length(x) > 1) x[2] else NA_character_, character(1)),
+    stringsAsFactors = FALSE
+  )
+  expect_equal(
+    gliph2(input, reference, local_similarities = FALSE, hla = frame)$cluster_properties,
+    res$cluster_properties
+  )
+})

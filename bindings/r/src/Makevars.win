@@ -15,17 +15,21 @@ $(SHLIB): $(STATLIB)
 
 CARGOTMP = $(CURDIR)/.cargo
 
-$(VENDOR)/Cargo.toml:
+# Refresh the vendored crate from the repository on every build, so a working
+# tree never compiles stale sources. A source tarball has no repository above
+# the package, and ships the copy instead. `vendor` names no file, so it
+# always runs; no GNU make extensions are used.
+vendor:
 	if [ -f "$(CORE)/Cargo.toml" ]; then \
 		mkdir -p $(VENDOR) && \
 		cp "$(CORE)/Cargo.toml" $(VENDOR)/Cargo.toml && \
 		rm -Rf $(VENDOR)/src && cp -R "$(CORE)/src" $(VENDOR)/src; \
-	else \
-		echo "ERROR: core crate not found at $(CORE) and not vendored in $(VENDOR)" >&2; \
+	elif [ ! -f "$(VENDOR)/Cargo.toml" ]; then \
+		echo "ERROR: core crate missing at $(CORE) and not vendored in $(VENDOR)" >&2; \
 		exit 1; \
 	fi
 
-$(STATLIB): $(VENDOR)/Cargo.toml
+$(STATLIB): vendor
 	mkdir -p $(TARGET_DIR)/libgcc_mock && touch $(TARGET_DIR)/libgcc_mock/libgcc_eh.a
 	if [ "$(NOT_CRAN)" != "true" ]; then \
 		export CARGO_HOME=$(CARGOTMP); \
@@ -41,9 +45,12 @@ $(STATLIB): $(VENDOR)/Cargo.toml
 C_clean:
 	rm -Rf $(SHLIB) $(OBJECTS) $(STATLIB)
 
-# $(VENDOR) is deliberately kept here; see Makevars.
+# $(VENDOR) is deliberately kept: R CMD build runs `clean` on its temporary
+# copy of the package, and the vendored crate must survive into the tarball.
 clean:
 	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rust/target
 
 distclean: clean
 	rm -Rf $(VENDOR)
+
+.PHONY: all vendor C_clean clean distclean

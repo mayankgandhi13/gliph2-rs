@@ -20,6 +20,7 @@ USAGE:
                     [--max-global-p P] [--max-global-q Q] [--min-subjects N]
                     [--case COND --control COND [--assoc-min-donors N]
                      [--assoc-max-p P] [--assoc-max-q Q] [--assoc-permute-seed S]]
+                    [--hla FILE]
   gliph2-rs synth   --n N --out FILE [--seed S] [--reference]
   gliph2-rs expand  --input FILE --factor F --out FILE [--seed S]
 
@@ -43,7 +44,12 @@ condition over another, reading the condition from the subject:condition
 column (e.g. --case CMV+ --control CMV- for subjects like HIP00110:CMV+).
 Groups in at least --assoc-min-donors labelled donors (default 10) get a
 one-sided Fisher p-value and a Benjamini-Hochberg q-value.
---assoc-permute-seed shuffles the labels among donors (a calibration control).";
+--assoc-permute-seed shuffles the labels among donors (a calibration control).
+
+--hla scores each group for HLA restriction: donors typed in FILE (one donor
+per line, `subject:condition` then its alleles) are tested for sharing an
+allele more often among a group's carriers than across the cohort. Unlike
+GLIPH2's simulated cluster scores this needs no RNG and is reproducible.";
 
 struct Args(Vec<String>);
 
@@ -190,6 +196,13 @@ fn gliph2_cmd(a: &Args) -> Result<(), String> {
         (None, None) => {}
         _ => return Err("--case and --control must be given together".into()),
     }
+    if let Some(path) = a.value("--hla") {
+        let by_donor = io::read_hla_table(path).map_err(|e| format!("{path}: {e}"))?;
+        if by_donor.is_empty() {
+            return Err(format!("{path}: no donor HLA typings found"));
+        }
+        p.hla = Some(gliph2::convergence::HlaTable { by_donor });
+    }
     p.local = !a.flag("--no-local");
     p.global = !a.flag("--no-global");
 
@@ -206,9 +219,15 @@ fn gliph2_cmd(a: &Args) -> Result<(), String> {
 
     let prefix = a.value("--out").unwrap_or("gliph2rs");
     let mut w = BufWriter::new(File::create(format!("{prefix}_groups.tsv")).map_err(|e| e.to_string())?);
-    gliph2::convergence::write_groups(&mut w, &rep, &res.groups, res.association.is_some()).map_err(|e| e.to_string())?;
+    gliph2::convergence::write_groups(&mut w, &rep, &res).map_err(|e| e.to_string())?;
     w.flush().map_err(|e| e.to_string())?;
     let n_local = res.groups.iter().filter(|g| g.kind == gliph2::convergence::GroupType::Local).count();
+    let hla = res.hla.map_or(String::new(), |s| {
+        format!(
+            ",\"hla_typed_donors\":{},\"hla_scored\":{},\"hla_tests\":{},\"hla_q05\":{}",
+            s.typed_donors, s.scored, s.tests, s.significant_q05
+        )
+    });
     let assoc = res.association.map_or(String::new(), |s| {
         format!(
             ",\"n_case\":{},\"n_control\":{},\"assoc_tested\":{},\"assoc_q05\":{}",
@@ -216,7 +235,7 @@ fn gliph2_cmd(a: &Args) -> Result<(), String> {
         )
     });
     println!(
-        "{{\"rows\":{},\"unique\":{},\"sample\":{},\"reference\":{},\"threads\":{},\"motifs\":{},\"local_groups\":{},\"global_groups\":{},\"t_io\":{:.4},\"t_gliph2\":{:.4},\"t_total\":{:.4}{}}}",
+        "{{\"rows\":{},\"unique\":{},\"sample\":{},\"reference\":{},\"threads\":{},\"motifs\":{},\"local_groups\":{},\"global_groups\":{},\"t_io\":{:.4},\"t_gliph2\":{:.4},\"t_total\":{:.4}{}{}}}",
         rep.rows.len(),
         rep.len(),
         res.n_sample,
@@ -228,7 +247,8 @@ fn gliph2_cmd(a: &Args) -> Result<(), String> {
         t_io.as_secs_f64(),
         t_run.as_secs_f64(),
         wall.elapsed().as_secs_f64(),
-        assoc
+        assoc,
+        hla
     );
     Ok(())
 }

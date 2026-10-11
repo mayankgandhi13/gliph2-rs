@@ -18,10 +18,8 @@
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 mkdir -p hpc/out
-export RUSTUP_HOME="${RUSTUP_HOME:-/scratch/$USER/rustup}"
-export CARGO_HOME="${CARGO_HOME:-/scratch/$USER/cargo}"
-export PATH="$CARGO_HOME/bin:$PATH"
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/scratch/$USER/gliph2-rs-target}"
+# shellcheck source=hpc/rust_env.sh
+. hpc/rust_env.sh
 
 cargo build --release --locked
 BIN="$CARGO_TARGET_DIR/release/gliph2-rs"

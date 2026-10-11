@@ -93,7 +93,7 @@ cargo build --release
 # -> results_clusters.tsv, results_motifs.tsv
 ```
 
-Input is a GLIPH2-style TSV (`CDR3b  TRBV  TRBJ  CDR3a  subject:condition  count`), a table with VDJtools or AIRR column names, or one CDR3 per line. `--paper-params` uses the values from GLIPH2's distributed parameter files (motif p ≤ 0.001, fold ≥ 10, CDR3 length ≥ 8, all substitutions allowed); without it, turboGliph's code defaults apply. `--gapped` / `--discontinuous` add motifs with one wildcard position, and `--fdr` thresholds Benjamini–Hochberg q-values instead of raw p-values.
+Input is a GLIPH2-style TSV (`CDR3b  TRBV  TRBJ  CDR3a  subject:condition  count`), a table with VDJtools or AIRR column names, or one CDR3 per line. `--paper-params` uses the values from GLIPH2's distributed parameter files (motif p ≤ 0.001, fold ≥ 10, CDR3 length ≥ 8, all substitutions allowed); without it, turboGliph's code defaults apply. `--gapped` / `--discontinuous` add motifs with one wildcard position, `--fdr` thresholds Benjamini–Hochberg q-values instead of raw p-values, and `--hla donors.tsv` scores each group for HLA restriction.
 
 GLIPH2 reports every global group without a significance filter, which on a pooled cohort means tens of millions of groups. The `gliph2` command adds a q-value (`fdr.q`, Benjamini–Hochberg within each group type) and a donor count (`n_subjects`) to every group, and three opt-in filters: `--max-global-p P`, `--max-global-q Q` and `--min-subjects N` (groups spanning at least N donors). All are off by default, so the output still matches turboGliph.
 
@@ -141,6 +141,12 @@ Times are for the paper settings; gliph2-rs times include reading the input and 
 
 Results: [`hpc/results/cmv-10881270_*`](hpc/results/).
 
+### HLA restriction
+
+`--hla donors.tsv` scores every group for HLA restriction: each allele among a group's typed carriers gets a one-sided hypergeometric test against the typed cohort, and the best allele is reported with a q-value (Bonferroni over the alleles tried in the group, then Benjamini–Hochberg across groups). Antigen-specific public TCRs are usually restricted by one allele, so this separates real specificity groups from CDR3s that are merely easy to generate.
+
+Of GLIPH2's five cluster scores this is the only one computed without simulation, so it is exactly reproducible. The other four (network size, CDR3 length, V gene, clonal expansion) compare a cluster against repeated random draws; turboGliph never seeds that RNG, so its values differ between runs and cannot be matched. They are not implemented.
+
 Not yet compared: turboGliph's simulation-based cluster scores (network size, CDR3 length, V gene, clonal expansion, HLA).
 
 ## Roadmap
@@ -157,7 +163,7 @@ Not yet compared: turboGliph's simulation-based cluster scores (network size, CD
 - [x] Full-cohort run (Emerson 2017, 151M rows)
 - [x] Per-group q-values, donor counts and opt-in global-group filters
 - [x] Donor-label association (CMV+ vs CMV−), with permutation, VDJdb and HLA checks
-- [ ] Cluster scoring (network size, CDR3 length, V gene, clonal expansion, HLA)
+- [x] HLA restriction scoring (deterministic; the other four GLIPH2 scores are simulation-based — see above)
 - [x] R binding (extendr), matching turboGliph group for group
 - [ ] Python binding (PyO3)
 - [ ] Write-up of results

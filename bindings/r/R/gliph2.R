@@ -45,6 +45,11 @@
 #'   association p- or q-value.
 #' @param assoc_permute_seed Shuffle the case/control labels among donors with
 #'   this seed, as a calibration control.
+#' @param hla Optional HLA typing per donor: a data frame whose first column
+#'   holds donor names (matching the donor column of `cdr3_sequences`) and
+#'   whose remaining columns hold alleles, or a named list of allele vectors.
+#'   Each group is then scored for HLA restriction, adding `hla.allele`,
+#'   `hla.donors`, `hla.with_allele`, `hla.p` and `hla.q` columns.
 #' @param n_cores Threads to use; `0` lets Rust choose.
 #'
 #' @return A list with
@@ -109,6 +114,7 @@ gliph2 <- function(cdr3_sequences,
                    assoc_max_p = NULL,
                    assoc_max_q = NULL,
                    assoc_permute_seed = NULL,
+                   hla = NULL,
                    n_cores = 0) {
   input <- .as_tcr_frame(cdr3_sequences, "cdr3_sequences")
   reference <- .as_tcr_frame(refdb_beta, "refdb_beta")$CDR3b
@@ -123,6 +129,7 @@ gliph2 <- function(cdr3_sequences,
   if (is.null(case) != is.null(control)) {
     stop("`case` and `control` must be given together.", call. = FALSE)
   }
+  hla_pairs <- .as_hla_pairs(hla)
 
   params <- list(
     lcminp = as.numeric(lcminp),
@@ -148,6 +155,8 @@ gliph2 <- function(cdr3_sequences,
     assoc_max_p = .num_or_null(assoc_max_p),
     assoc_max_q = .num_or_null(assoc_max_q),
     assoc_permute_seed = .num_or_null(assoc_permute_seed),
+    hla_donor = hla_pairs$donor,
+    hla_allele = hla_pairs$allele,
     n_cores = as.numeric(n_cores)
   )
 
@@ -165,6 +174,7 @@ gliph2 <- function(cdr3_sequences,
     selected_motifs = .as_frame(res$motifs),
     cluster_list = stats::setNames(strsplit(groups$members, " ", fixed = TRUE), tags),
     association = if (is.null(res$association)) NULL else as.data.frame(res$association),
+    hla = if (is.null(res$hla)) NULL else as.data.frame(res$hla),
     sample_size = res$n_sample,
     reference_size = res$n_reference,
     input_size = res$n_input_cdr3
@@ -226,6 +236,31 @@ gliph2_paper_params <- function() {
     counts = counts,
     stringsAsFactors = FALSE
   )
+}
+
+# Flattens HLA typing into parallel donor/allele vectors.
+.as_hla_pairs <- function(hla) {
+  if (is.null(hla)) {
+    return(list(donor = character(), allele = character()))
+  }
+  if (is.list(hla) && !is.data.frame(hla)) {
+    if (is.null(names(hla))) {
+      stop("`hla` list must be named by donor.", call. = FALSE)
+    }
+    donor <- rep(names(hla), lengths(hla))
+    allele <- as.character(unlist(hla, use.names = FALSE))
+  } else if (is.data.frame(hla)) {
+    if (ncol(hla) < 2) {
+      stop("`hla` data frame needs a donor column and at least one allele column.", call. = FALSE)
+    }
+    wide <- as.matrix(hla[, -1, drop = FALSE])
+    donor <- rep(as.character(hla[[1]]), ncol(wide))
+    allele <- as.character(wide)
+  } else {
+    stop("`hla` must be a data frame or a named list.", call. = FALSE)
+  }
+  keep <- !is.na(donor) & !is.na(allele) & nzchar(donor) & nzchar(allele) & allele != "NA"
+  list(donor = donor[keep], allele = allele[keep])
 }
 
 # The 20 standard amino acids, matching the Rust parser.

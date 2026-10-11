@@ -242,6 +242,30 @@ pub fn read_repertoire(path: impl AsRef<Path>) -> io::Result<Repertoire> {
     parse_repertoire(&std::fs::read(path)?)
 }
 
+/// Reads a donor HLA table: one donor per line, the `subject:condition`
+/// string followed by its alleles, tab- or comma-separated. A header line
+/// naming the first column (`subject`, `sample_id`, …) is skipped.
+pub fn read_hla_table(path: impl AsRef<Path>) -> io::Result<HashMap<String, Vec<String>>> {
+    let text = std::fs::read_to_string(path)?;
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for (lineno, line) in text.lines().enumerate() {
+        let line = line.trim_end();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut fields = line.split(['\t', ',']).map(str::trim).filter(|f| !f.is_empty());
+        let Some(donor) = fields.next() else { continue };
+        let alleles: Vec<String> = fields.filter(|a| !a.eq_ignore_ascii_case("NA")).map(str::to_owned).collect();
+        if lineno == 0 && matches!(donor.to_ascii_lowercase().as_str(), "subject" | "sample_id" | "donor" | "patient" | "subject:condition") {
+            continue;
+        }
+        if !alleles.is_empty() {
+            out.entry(donor.to_owned()).or_default().extend(alleles);
+        }
+    }
+    Ok(out)
+}
+
 /// Reads only the unique CDR3s of a table (e.g. a reference repertoire).
 pub fn read_sequences(path: impl AsRef<Path>) -> io::Result<Vec<Vec<u8>>> {
     Ok(read_repertoire(path)?.sequences)

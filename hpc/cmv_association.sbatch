@@ -18,9 +18,8 @@
 
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
-export RUSTUP_HOME=/scratch/$USER/rustup CARGO_HOME=/scratch/$USER/cargo
-export PATH="$CARGO_HOME/bin:$PATH"
-export CARGO_TARGET_DIR=/scratch/$USER/gliph2-rs-target
+# shellcheck source=hpc/rust_env.sh
+. hpc/rust_env.sh
 cargo build --release --locked
 BIN="$CARGO_TARGET_DIR/release/gliph2-rs"
 
@@ -44,7 +43,8 @@ run() { # label, extra flags...
   local out
   out=$(/usr/bin/time -f '%M %e' -o "$OUT/time_$label" "$BIN" gliph2 --input "$DATA/hip_pooled.tsv" \
         --reference "$REF" --paper-params --threads "$CPUS" --min-subjects 10 \
-        --case CMV+ --control CMV- --assoc-min-donors 10 --out "$OUT/$label" "$@")
+        --case CMV+ --control CMV- --assoc-min-donors 10 --hla "$DATA/hip_hla.tsv" \
+        --out "$OUT/$label" "$@")
   read -r rss wall < "$OUT/time_$label"
   echo "{\"label\":\"$label\",\"flags\":\"$*\",\"max_rss_kb\":$rss,\"wall_s\":$wall,\"run\":$out}" | tee -a "$RESULTS"
 }
@@ -57,7 +57,22 @@ for label in cmv cmv_permuted; do
   echo "{\"label\":\"vdjdb_$label\",\"summary\":$summary}" | tee -a "$RESULTS"
 done
 
-# HLA restriction of the CMV-associated families (626 HLA-typed donors).
+# Cross-check: the engine's per-group HLA scores against the independent
+# Python implementation, which works on merged families.
 hla=$(python3 hpc/family_hla.py "$OUT/top_cmv_groups_families.tsv" "$DATA/hip_pooled.tsv" "$DATA/hip_hla.tsv" "$OUT/family_hla.tsv")
 echo "{\"label\":\"family_hla\",\"summary\":$hla}" | tee -a "$RESULTS"
 column -t -s $'\t' "$OUT/family_hla.tsv"
+
+# The engine scores every group; show the CMV-associated ones it found.
+python3 - "$OUT/cmv_groups.tsv" <<'PY' | tee -a "$RESULTS"
+import csv, json, math, sys
+csv.field_size_limit(sys.maxsize)
+rows = [r for r in csv.DictReader(open(sys.argv[1]), delimiter="\t")
+        if not math.isnan(float(r["assoc.q"])) and float(r["assoc.q"]) <= 0.05]
+rows.sort(key=lambda r: float(r["assoc.p"]))
+print(json.dumps({"label": "engine_hla", "cmv_groups": len(rows),
+                  "with_hla_q05": sum(float(r["hla.q"]) <= 0.05 for r in rows),
+                  "top": [{"tag": r["tag"], "case": int(r["case_donors"]), "control": int(r["control_donors"]),
+                           "hla": r["hla.allele"], "hla_frac": round(int(r["hla.with_allele"]) / max(1, int(r["hla.donors"])), 3),
+                           "hla_q": float(r["hla.q"])} for r in rows[:10]]}))
+PY
