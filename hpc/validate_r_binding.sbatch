@@ -57,5 +57,6 @@ EOF
 
 for n in ${SIZES:-2000 10000 50000}; do
   head -n $((n + 1)) "$POOL" > "$WORK/in_$n.tsv"
-  Rscript hpc/compare_r_binding.R "$WORK/in_$n.tsv" "$REF" "$CPUS" | tee -a "$RESULTS"
+  Rscript hpc/compare_r_binding.R "$WORK/in_$n.tsv" "$REF" "$CPUS" "$RESULTS"
 done
+cat "$RESULTS"

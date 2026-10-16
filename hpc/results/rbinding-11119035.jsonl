@@ -1,0 +1,6 @@
+{"params":"paper","n":2000,"turbogliph_groups":17,"gliph2rs_groups":17,"identical":true,"only_turbogliph":0,"only_gliph2rs":0,"t_gliph2rs":3.42,"t_turbogliph":22.62,"speedup":6.6}
+{"params":"default","n":2000,"turbogliph_groups":13,"gliph2rs_groups":13,"identical":true,"only_turbogliph":0,"only_gliph2rs":0,"t_gliph2rs":3.40,"t_turbogliph":21.53,"speedup":6.3}
+{"params":"paper","n":10000,"turbogliph_groups":210,"gliph2rs_groups":210,"identical":true,"only_turbogliph":0,"only_gliph2rs":0,"t_gliph2rs":3.54,"t_turbogliph":25.00,"speedup":7.1}
+{"params":"default","n":10000,"turbogliph_groups":109,"gliph2rs_groups":109,"identical":true,"only_turbogliph":0,"only_gliph2rs":0,"t_gliph2rs":3.61,"t_turbogliph":26.70,"speedup":7.4}
+{"params":"paper","n":50000,"turbogliph_groups":4226,"gliph2rs_groups":4226,"identical":true,"only_turbogliph":0,"only_gliph2rs":0,"t_gliph2rs":4.08,"t_turbogliph":44.01,"speedup":10.8}
+{"params":"default","n":50000,"turbogliph_groups":1720,"gliph2rs_groups":1720,"identical":true,"only_turbogliph":0,"only_gliph2rs":0,"t_gliph2rs":3.41,"t_turbogliph":33.79,"speedup":9.9}

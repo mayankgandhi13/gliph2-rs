@@ -3,9 +3,10 @@
 R bindings for [gliph2-rs](../../), the Rust reimplementation of the GLIPH2 core
 engine, built with [extendr](https://extendr.github.io/).
 
-Group membership is identical to `turboGliph::gliph2()` — verified on subsets of
-the Emerson 2017 cohort from 2,000 to 100,000 CDR3s, under two parameter sets —
-while the computation runs in parallel Rust.
+Group membership is identical to `turboGliph::gliph2()`. Running both packages in
+one R session on subsets of the Emerson 2017 cohort, every group matched under
+both parameter sets — 6,295 of 6,295 at 2,000 to 50,000 CDR3s, none found by only
+one package — while this package ran 6–11× faster.
 
 ## Install
 

@@ -75,7 +75,9 @@ res <- gliph2rs::gliph2(my_tcrs, refdb_beta = ref_CD48)
 head(res$cluster_properties)
 ```
 
-It returns the same groups as `turboGliph::gliph2()`, with `cluster_properties`, `selected_motifs` and `cluster_list` elements, plus the donor-association columns. See [its README](bindings/r/README.md).
+It returns the same groups as `turboGliph::gliph2()`, with `cluster_properties`, `selected_motifs` and `cluster_list` elements, plus the donor-association and HLA columns. Running both packages in one R session on Explorer, every group matched on 2,000–50,000 CDR3 subsets under both parameter sets — 6,295 of 6,295, none found by only one package — at 6–11× the speed ([`hpc/validate_r_binding.sbatch`](hpc/validate_r_binding.sbatch), [results](hpc/results/rbinding-11119035.jsonl)). The R path is slower than the CLI (about 3.5 s vs 1 s) because the 1.19M-sequence reference crosses from R into Rust on every call.
+
+See [its README](bindings/r/README.md).
 
 A PyO3 binding is planned for comparison against Python tools like clusTCR and GIANA.
 
