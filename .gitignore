@@ -4,3 +4,8 @@
 __pycache__/
 bindings/*.tar.gz
 bindings/*.Rcheck/
+bindings/python/target/
+bindings/python/python/gliph2rs/*.so
+bindings/python/.venv/
+**/__pycache__/
+.pytest_cache/

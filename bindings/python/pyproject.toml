@@ -1,0 +1,27 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "gliph2rs"
+version = "0.1.0"
+description = "Fast, deterministic GLIPH2 convergence groups for TCR repertoires"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Mayank Gandhi", email = "gandhi.may@northeastern.edu" }]
+keywords = ["TCR", "immunology", "GLIPH2", "repertoire", "bioinformatics"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.urls]
+Homepage = "https://github.com/mayankgandhi13/gliph2-rs"
+Issues = "https://github.com/mayankgandhi13/gliph2-rs/issues"
+
+[tool.maturin]
+python-source = "python"
+module-name = "gliph2rs._gliph2rs"
+features = ["pyo3/extension-module"]

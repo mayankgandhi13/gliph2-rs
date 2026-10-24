@@ -59,7 +59,7 @@ gliph2-rs/
 ├── hpc/                     # Slurm jobs, data setup, validation vs. turboGliph
 ├── bindings/
 │   ├── r/                   # extendr wrapper (the `gliph2rs` R package)
-│   └── python/              # PyO3 wrapper (planned)
+│   └── python/              # PyO3 wrapper (the `gliph2rs` Python package)
 └── benches/
     └── vs_gliph2.rs
 ```
@@ -79,7 +79,22 @@ It returns the same groups as `turboGliph::gliph2()`, with `cluster_properties`,
 
 See [its README](bindings/r/README.md).
 
-A PyO3 binding is planned for comparison against Python tools like clusTCR and GIANA.
+### Python binding
+
+[`bindings/python`](bindings/python/) is a Python package (`gliph2rs`, via `PyO3`), built for the pandas-centric tooling around clusTCR and GIANA:
+
+```bash
+pip install ./bindings/python
+```
+
+```python
+import gliph2rs, pandas as pd
+
+res = gliph2rs.gliph2(cdr3, reference)
+pd.DataFrame(res["groups"])
+```
+
+Columns and options mirror the R package, including `case`/`control` association and `hla=` restriction scoring. It reproduces the CLI exactly (457 of 457 groups on 4,000 synthetic CDR3s, identical Fisher scores). See [its README](bindings/python/README.md).
 
 ## Usage
 
@@ -171,7 +186,7 @@ Not yet compared: turboGliph's simulation-based cluster scores (network size, CD
 - [x] Donor-label association (CMV+ vs CMV−), with permutation, VDJdb and HLA checks
 - [x] HLA restriction scoring (deterministic; the other four GLIPH2 scores are simulation-based — see above)
 - [x] R binding (extendr), matching turboGliph group for group
-- [ ] Python binding (PyO3)
+- [x] Python binding (PyO3), matching the CLI group for group
 - [ ] Write-up of results
 
 ## Acknowledgements
