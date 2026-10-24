@@ -149,6 +149,10 @@ Results: [`hpc/results/cmv-10881270_*`](hpc/results/).
 
 Of GLIPH2's five cluster scores this is the only one computed without simulation, so it is exactly reproducible. The other four (network size, CDR3 length, V gene, clonal expansion) compare a cluster against repeated random draws; turboGliph never seeds that RNG, so its values differ between runs and cannot be matched. They are not implemented.
 
+On the full cohort (626 HLA-typed donors) the engine scores 58.0M groups in the same 4.7-minute run, of which 2,923 are restricted at q ≤ 0.05. The scores are unchanged when the CMV labels are permuted, as they must be — HLA scoring never reads those labels.
+
+Of the 57 CMV-associated groups, 19 are also HLA-restricted. The strongest, the `SIGPLEHNE` family, is carried by 42 CMV+ and 0 CMV− donors and every typed carrier is HLA-A\*01 (q = 7×10⁻¹⁵). This agrees with [`hpc/family_hla.py`](hpc/family_hla.py), an independent implementation that reaches the same allele from merged families (44 of 46 carriers, 0.957) rather than single groups.
+
 Not yet compared: turboGliph's simulation-based cluster scores (network size, CDR3 length, V gene, clonal expansion, HLA).
 
 ## Roadmap
