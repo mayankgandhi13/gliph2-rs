@@ -9,3 +9,4 @@ bindings/python/python/gliph2rs/*.so
 bindings/python/.venv/
 **/__pycache__/
 .pytest_cache/
+dist/

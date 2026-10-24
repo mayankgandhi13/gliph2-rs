@@ -67,6 +67,19 @@ Each allele among a group's typed carriers is tested against the typed cohort
 (one-sided hypergeometric); the best allele is reported with a q-value
 (Bonferroni within the group, then Benjamini-Hochberg across groups).
 
+## Releasing
+
+```bash
+tools/release.sh          # sdist + a wheel for the current interpreter
+twine upload dist/*
+```
+
+The sdist is rooted at the repository so the binding's path dependency on the
+core crate resolves; the root `Cargo.toml` excludes the parts that belong to
+other targets, which keeps it to the Rust core, this package and the licence.
+Wheels for other platforms are best built with
+[maturin-action](https://github.com/PyO3/maturin-action).
+
 ## Differences from turboGliph
 
 - Group membership, tags and Fisher scores match exactly.

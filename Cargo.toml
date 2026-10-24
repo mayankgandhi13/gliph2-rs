@@ -5,6 +5,14 @@ edition = "2021"
 rust-version = "1.82"
 description = "Fast, deterministic Rust reimplementation of the GLIPH2 TCR clustering core"
 license = "MIT"
+repository = "https://github.com/mayankgandhi13/gliph2-rs"
+homepage = "https://github.com/mayankgandhi13/gliph2-rs"
+readme = "README.md"
+# maturin builds the Python sdist from this manifest's file list, rooted at
+# the repository so the binding's path dependency resolves. Keep the parts
+# that belong to other targets out of it; bindings/python contributes its
+# own files (and its own LICENSE copy) through its manifest.
+exclude = ["hpc/**", "bindings/**", "benches/**", "LICENSE"]
 
 [lib]
 name = "gliph2"
