@@ -9,14 +9,20 @@ Description: Groups T-cell receptor CDR3 beta sequences that are predicted to
     share antigen specificity, following the GLIPH2 method of Huang et al.
     (2020) <doi:10.1038/s41587-020-0505-4>. Group membership matches
     'turboGliph' exactly, while the computation runs in parallel Rust and
-    scales to pooled cohorts of 100 million sequences. Also tests groups for
+    scales to pooled cohorts of 100 million sequences. The Rust sources and
+    their dependencies are bundled, so no network access is needed to build. Also tests groups for
     association with a donor condition, such as cytomegalovirus serostatus.
 License: MIT + file LICENSE
+Copyright: Mayank Gandhi, for the R code and the bundled 'gliph2-rs'
+    crate. The Rust dependencies bundled in src/rust/vendor.tar.xz remain
+    the copyright of their own authors and are licensed MIT or Apache-2.0;
+    they are listed with their authors and licences in inst/AUTHORS.
 Encoding: UTF-8
-SystemRequirements: Cargo (Rust's package manager), rustc
+SystemRequirements: Cargo (Rust's package manager), rustc >= 1.82
 Depends: R (>= 4.1.0)
 Imports: stats
-Suggests: testthat (>= 3.0.0)
+Suggests: testthat (>= 3.0.0), knitr, rmarkdown
+VignetteBuilder: knitr
 Config/testthat/edition: 3
 URL: https://github.com/mayankgandhi13/gliph2-rs
 BugReports: https://github.com/mayankgandhi13/gliph2-rs/issues

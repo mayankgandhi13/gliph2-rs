@@ -1,5 +1,11 @@
 ^src/rust/target$
 ^src/\.cargo$
+^src/vendor$
+^src/Makevars$
+^src/Makevars\.win$
 \.o$
 \.so$
 \.a$
+^tools/vendor\.sh$
+^tools/authors\.sh$
+^cran-comments\.md$

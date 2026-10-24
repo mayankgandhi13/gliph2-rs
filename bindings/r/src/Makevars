@@ -3,50 +3,47 @@ LIBDIR = $(TARGET_DIR)/release
 STATLIB = $(LIBDIR)/libgliph2rs.a
 PKG_LIBS = -L$(LIBDIR) -lgliph2rs
 
-# The core crate is vendored into rust/core so the package is self-contained.
-VENDOR = ./rust/core
-CORE = $(CURDIR)/../../..
+all: $(SHLIB) rust_clean
 
-all: C_clean
+.PHONY: $(STATLIB)
 
 $(SHLIB): $(STATLIB)
 
 CARGOTMP = $(CURDIR)/.cargo
+VENDOR_DIR = $(CURDIR)/vendor
 
-# Refresh the vendored crate from the repository on every build, so a working
-# tree never compiles stale sources. A source tarball has no repository above
-# the package, and ships the copy instead. `vendor` names no file, so it
-# always runs; no GNU make extensions are used.
-vendor:
-	if [ -f "$(CORE)/Cargo.toml" ]; then \
-		mkdir -p $(VENDOR) && \
-		cp "$(CORE)/Cargo.toml" $(VENDOR)/Cargo.toml && \
-		rm -Rf $(VENDOR)/src && cp -R "$(CORE)/src" $(VENDOR)/src; \
-	elif [ ! -f "$(VENDOR)/Cargo.toml" ]; then \
-		echo "ERROR: core crate missing at $(CORE) and not vendored in $(VENDOR)" >&2; \
-		exit 1; \
+$(STATLIB):
+	# The core crate ships as rust/core. In a repository checkout, refresh it
+	# so a working tree never compiles stale sources; a source tarball has no
+	# repository above it and keeps the copy it shipped with.
+	if [ -f ../../../src/convergence.rs ]; then \
+		mkdir -p rust/core && \
+		cp ../../../Cargo.toml rust/core/Cargo.toml && \
+		rm -Rf rust/core/src && cp -R ../../../src rust/core/src; \
 	fi
 
-$(STATLIB): vendor
-	if [ "$(NOT_CRAN)" != "true" ]; then \
-		export CARGO_HOME=$(CARGOTMP); \
-	fi && \
-		export PATH="$(PATH):$(HOME)/.cargo/bin" && \
-		cargo build --lib --release --manifest-path=./rust/Cargo.toml --target-dir $(TARGET_DIR)
-	if [ "$(NOT_CRAN)" != "true" ]; then \
-		rm -Rf $(CARGOTMP) && \
-		rm -Rf $(LIBDIR)/build; \
+	# If a vendor directory exists, it is used for offline compilation.
+	# Otherwise, if vendor.tar.xz exists it is unpacked and used.
+	if [ -d ./vendor ]; then \
+		echo "=== Using offline vendor directory ==="; \
+		mkdir -p $(CARGOTMP) && \
+		cp rust/vendor-config.toml $(CARGOTMP)/config.toml; \
+	elif [ -f ./rust/vendor.tar.xz ]; then \
+		echo "=== Using offline vendor tarball ==="; \
+		tar xf rust/vendor.tar.xz && \
+		mkdir -p $(CARGOTMP) && \
+		cp rust/vendor-config.toml $(CARGOTMP)/config.toml; \
 	fi
 
-C_clean:
-	rm -Rf $(SHLIB) $(OBJECTS) $(STATLIB)
+	export CARGO_HOME=$(CARGOTMP) && \
+	export PATH="$(PATH):$(HOME)/.cargo/bin" && \
+	cargo build  --lib --release --manifest-path=./rust/Cargo.toml --target-dir $(TARGET_DIR) 
 
-# $(VENDOR) is deliberately kept: R CMD build runs `clean` on its temporary
-# copy of the package, and the vendored crate must survive into the tarball.
+	# Always clean up CARGOTMP
+	rm -Rf $(CARGOTMP);
+
+rust_clean: $(SHLIB)
+	rm -Rf $(CARGOTMP) $(VENDOR_DIR) $(TARGET_DIR)
+
 clean:
-	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) rust/target
-
-distclean: clean
-	rm -Rf $(VENDOR)
-
-.PHONY: all vendor C_clean clean distclean
+	rm -Rf $(SHLIB) $(STATLIB) $(OBJECTS) $(TARGET_DIR) $(VENDOR_DIR)

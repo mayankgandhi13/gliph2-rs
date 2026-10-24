@@ -1,0 +1,149 @@
+---
+title: "Finding TCR specificity groups with gliph2rs"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Finding TCR specificity groups with gliph2rs}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+T cells that recognise the same antigen tend to carry similar CDR3β loops.
+GLIPH2 turns that observation into *convergence groups*: sets of CDR3β
+sequences that converge on a shared binding motif or differ at a single
+position. `gliph2rs` computes those groups in Rust, reproducing
+`turboGliph::gliph2()` exactly while scaling to pooled cohorts.
+
+```{r setup}
+library(gliph2rs)
+```
+
+## The two kinds of group
+
+GLIPH2 ignores the first and last three residues of each CDR3, which are
+germline-encoded and shared by almost every sequence, and works on the
+interior.
+
+**Local groups** come from short motifs that occur far more often in your
+sample than in a reference repertoire of unselected T cells. **Global groups**
+come from CDR3s whose interiors are identical apart from one position.
+
+A small example, with a reference built so that one motif stands out:
+
+```{r example}
+reference <- c(
+  sprintf("CASSL%sAGYEQYF", LETTERS[c(1, 3:9, 11:14, 16:20)]),
+  sprintf("CASGP%sETQYQF", c("A", "D", "E", "K", "R"))
+)
+
+sample_cdr3 <- c(
+  "CASGIETQYQF", # these two differ only at one interior position
+  "CASGVETQYQF",
+  "CASSLNTEAFF"
+)
+
+res <- gliph2(sample_cdr3, reference, local_similarities = FALSE)
+res$cluster_properties[, c("type", "tag", "cluster_size", "n_subjects")]
+```
+
+The tag `G%ETQ_IV` reads as: the masked interior `G%ETQ`, where `%` is the
+varying position, carrying isoleucine or valine there. Members are available
+per group:
+
+```{r members}
+res$cluster_list
+```
+
+By default a global edge needs the two residues to be compatible under
+BLOSUM62, so a chemically dissimilar substitution does not join a group. Set
+`all_aa_interchangeable = TRUE` to allow any substitution, as GLIPH2's own
+parameter files do.
+
+## Parameters
+
+`gliph2()`'s defaults follow turboGliph's code. The settings distributed with
+GLIPH2 itself are stricter and are available as a list:
+
+```{r paper-params}
+str(gliph2_paper_params())
+```
+
+```{r paper-run}
+res <- do.call(gliph2, c(
+  list(cdr3_sequences = sample_cdr3, refdb_beta = reference),
+  gliph2_paper_params()
+))
+nrow(res$cluster_properties)
+```
+
+## Testing groups against a donor condition
+
+Given a cohort with donors labelled `subject:condition`, every group can be
+tested for enrichment in one condition over another with a donor-level
+Fisher's exact test. Here six donors are seropositive and six are not, and one
+sequence pair is carried only by the positives:
+
+```{r association}
+donors <- c(paste0("D", 1:6, ":CMV+"), paste0("D", 7:12, ":CMV-"))
+cohort <- data.frame(
+  CDR3b = c(rep("CASGQETQYQF", 3), rep("CASGPETQYQF", 3), rep("CASSLKKKYQF", 6)),
+  patient = c(donors[1:6], donors[7:12]),
+  stringsAsFactors = FALSE
+)
+
+assoc <- gliph2(cohort, reference,
+  local_similarities = FALSE, all_aa_interchangeable = TRUE,
+  case = "CMV+", control = "CMV-", assoc_min_donors = 2
+)
+assoc$cluster_properties[, c("tag", "case_donors", "control_donors", "assoc.p")]
+```
+
+`assoc_permute_seed =` shuffles the labels among donors while keeping their
+counts, which is a useful negative control: on a real cohort the number of
+significant groups should collapse to near zero.
+
+## HLA restriction
+
+Antigen-specific public TCRs are usually restricted by a single HLA allele, so
+a group whose carriers share an allele far more often than the cohort does is
+more likely to be genuine. Pass donor typing to score every group:
+
+```{r hla}
+typing <- lapply(1:12, function(i) if (i <= 6) "HLA-A*01" else "HLA-B*07")
+names(typing) <- sub(":.*", "", donors)
+
+hla <- gliph2(
+  transform(cohort, patient = sub(":.*", "", patient)),
+  reference,
+  local_similarities = FALSE, all_aa_interchangeable = TRUE, hla = typing
+)
+hla$cluster_properties[, c("tag", "hla.allele", "hla.with_allele", "hla.donors", "hla.p")]
+```
+
+This is the one GLIPH2 cluster score computed without simulation, so it is
+exactly reproducible. The other four (network size, CDR3 length, V gene and
+clonal expansion) compare a cluster against repeated random draws; turboGliph
+never seeds that generator, so its values differ between runs and are not
+implemented here.
+
+## Reproducibility
+
+Results do not depend on the number of threads, or on how many times you run
+them:
+
+```{r threads}
+identical(
+  gliph2(sample_cdr3, reference, n_cores = 1)$cluster_properties,
+  gliph2(sample_cdr3, reference, n_cores = 2)$cluster_properties
+)
+```
+
+## Reference
+
+Huang H, Wang C, Rubelt F, Scriba TJ, Davis MM (2020). Analyzing the
+*Mycobacterium tuberculosis* immune response by T-cell receptor clustering
+with GLIPH2 and genome-wide antigen screening. *Nature Biotechnology*.
+\doi{10.1038/s41587-020-0505-4}

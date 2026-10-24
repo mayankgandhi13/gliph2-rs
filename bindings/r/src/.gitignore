@@ -1,6 +1,9 @@
 rust/target
 .cargo
+vendor
 *.o
 *.so
 *.a
 rust/core
+Makevars
+Makevars.win

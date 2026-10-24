@@ -1,7 +1,7 @@
 # gliph2rs
 
 R bindings for [gliph2-rs](../../), the Rust reimplementation of the GLIPH2 core
-engine, built with [extendr](https://extendr.github.io/).
+engine, built with [extendr](https://extendr.rs/).
 
 Group membership is identical to `turboGliph::gliph2()`. Running both packages in
 one R session on subsets of the Emerson 2017 cohort, every group matched under
@@ -11,7 +11,8 @@ one package — while this package ran 6–11× faster.
 ## Install
 
 The package compiles the Rust core, so [Rust](https://rustup.rs) must be
-installed (`cargo` on your `PATH`).
+installed (`cargo` on your `PATH` or in `~/.cargo/bin`); `configure` checks for
+it and reports the version it finds.
 
 ```r
 # from a checkout of the repository
@@ -21,8 +22,10 @@ install.packages("bindings/r", repos = NULL, type = "source")
 remotes::install_github("mayankgandhi13/gliph2-rs", subdir = "bindings/r")
 ```
 
-The core crate is vendored into `src/rust/core` at build time, so the package is
-self-contained once built.
+Everything needed to compile ships with the package: the core crate as
+`src/rust/core`, and its Cargo dependencies bundled in `src/rust/vendor.tar.xz`,
+so the build needs no network access. Run `tools/vendor.sh` after changing
+`Cargo.toml` to refresh the bundle and `inst/AUTHORS`.
 
 ## Use
 
