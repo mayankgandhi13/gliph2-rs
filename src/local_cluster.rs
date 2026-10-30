@@ -81,9 +81,7 @@ pub fn local_cluster(sequences: &[Vec<u8>], params: &LocalParams) -> Vec<LocalEd
             while start < order.len() {
                 let head = &sequences[order[start] as usize];
                 let mut end = start + 1;
-                while end < order.len()
-                    && cmp_masked(head, &sequences[order[end] as usize], p) == Ordering::Equal
-                {
+                while end < order.len() && cmp_masked(head, &sequences[order[end] as usize], p) == Ordering::Equal {
                     end += 1;
                 }
                 let group = &order[start..end];

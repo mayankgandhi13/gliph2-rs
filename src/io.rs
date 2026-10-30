@@ -203,8 +203,25 @@ pub fn normalize_cdr3(raw: &[u8]) -> Option<Cow<'_, [u8]>> {
 pub fn is_amino_acid(c: u8) -> bool {
     matches!(
         c,
-        b'A' | b'C' | b'D' | b'E' | b'F' | b'G' | b'H' | b'I' | b'K' | b'L'
-            | b'M' | b'N' | b'P' | b'Q' | b'R' | b'S' | b'T' | b'V' | b'W' | b'Y'
+        b'A' | b'C'
+            | b'D'
+            | b'E'
+            | b'F'
+            | b'G'
+            | b'H'
+            | b'I'
+            | b'K'
+            | b'L'
+            | b'M'
+            | b'N'
+            | b'P'
+            | b'Q'
+            | b'R'
+            | b'S'
+            | b'T'
+            | b'V'
+            | b'W'
+            | b'Y'
     )
 }
 
@@ -222,9 +239,7 @@ impl Columns {
 
     fn from_header(fields: &[&[u8]]) -> Option<Columns> {
         let find = |names: &[&str]| {
-            fields
-                .iter()
-                .position(|f| names.iter().any(|n| f.trim_ascii().eq_ignore_ascii_case(n.as_bytes())))
+            fields.iter().position(|f| names.iter().any(|n| f.trim_ascii().eq_ignore_ascii_case(n.as_bytes())))
         };
         let cdr3 = find(&["CDR3b", "cdr3aa", "cdr3", "cdr3_b_aa", "junction_aa", "aminoAcid", "amino_acid"])?;
         Some(Columns {
@@ -256,7 +271,12 @@ pub fn read_hla_table(path: impl AsRef<Path>) -> io::Result<HashMap<String, Vec<
         let mut fields = line.split(['\t', ',']).map(str::trim).filter(|f| !f.is_empty());
         let Some(donor) = fields.next() else { continue };
         let alleles: Vec<String> = fields.filter(|a| !a.eq_ignore_ascii_case("NA")).map(str::to_owned).collect();
-        if lineno == 0 && matches!(donor.to_ascii_lowercase().as_str(), "subject" | "sample_id" | "donor" | "patient" | "subject:condition") {
+        if lineno == 0
+            && matches!(
+                donor.to_ascii_lowercase().as_str(),
+                "subject" | "sample_id" | "donor" | "patient" | "subject:condition"
+            )
+        {
             continue;
         }
         if !alleles.is_empty() {

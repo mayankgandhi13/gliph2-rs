@@ -1,6 +1,8 @@
 # gliph2-rs
 
-> 🚧 **Status: In progress.** The core engine works and matches turboGliph's GLIPH2 convergence groups exactly on real data (see [Validation](#validation)). Bindings and scoring are not done yet.
+[![ci](https://github.com/mayankgandhi13/gliph2-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/mayankgandhi13/gliph2-rs/actions/workflows/ci.yml)
+
+> **Status: working, not yet released.** The engine reproduces turboGliph's GLIPH2 convergence groups exactly on real data (see [Validation](#validation)), scales to a pooled 151M-row cohort, and is usable from the command line, [R](bindings/r/) and [Python](bindings/python/). The R package passes `R CMD check --as-cran` and the Python package passes `twine check`, but neither has been submitted. Four of GLIPH2's five cluster scores are deliberately not implemented, because they are simulation-based and cannot be reproduced; see [HLA restriction](#hla-restriction).
 
 A fast, deterministic Rust reimplementation of the GLIPH2 core engine for clustering T-cell receptors (TCRs) by predicted shared antigen specificity, with bindings for R and Python.
 
@@ -187,6 +189,9 @@ Not yet compared: turboGliph's simulation-based cluster scores (network size, CD
 - [x] HLA restriction scoring (deterministic; the other four GLIPH2 scores are simulation-based — see above)
 - [x] R binding (extendr), matching turboGliph group for group
 - [x] Python binding (PyO3), matching the CLI group for group
+- [x] Continuous integration: tests, clippy and formatting on Linux, macOS and Windows;
+      `R CMD check --as-cran` on four R configurations; Python 3.9 and 3.13; a check that
+      the CLI, R and Python interfaces return identical groups; and a PyPI wheel matrix
 - [ ] Write-up of results
 
 ## Acknowledgements

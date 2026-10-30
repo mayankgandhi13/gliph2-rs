@@ -127,11 +127,7 @@ impl Default for EnrichmentParams {
 
 impl EnrichmentParams {
     fn min_fold(&self, k: usize) -> f64 {
-        self.min_fold_by_k
-            .iter()
-            .find(|(kk, _)| *kk == k)
-            .map(|(_, f)| *f)
-            .unwrap_or(self.default_min_fold)
+        self.min_fold_by_k.iter().find(|(kk, _)| *kk == k).map(|(_, f)| *f).unwrap_or(self.default_min_fold)
     }
 }
 
@@ -195,12 +191,8 @@ pub fn test_motifs(input: &MotifTable, reference: &MotifTable, params: &Enrichme
     let n_ref = reference.n_sequences;
     let lf = LogFactorial::new((n_input as usize) + (n_ref as usize));
 
-    let mut candidates: Vec<(Kmer, u32)> = input
-        .counts
-        .iter()
-        .filter(|(_, &a)| a >= params.min_count)
-        .map(|(&k, &a)| (k, a))
-        .collect();
+    let mut candidates: Vec<(Kmer, u32)> =
+        input.counts.iter().filter(|(_, &a)| a >= params.min_count).map(|(&k, &a)| (k, a)).collect();
     candidates.sort_unstable_by_key(|(k, _)| *k);
 
     let mut tested: Vec<MotifResult> = candidates
@@ -209,13 +201,17 @@ pub fn test_motifs(input: &MotifTable, reference: &MotifTable, params: &Enrichme
             // A reference count can't exceed the reference size; clamp so a
             // mismatched table never produces an invalid contingency table.
             let c = reference.get(motif).min(n_ref);
-            let fold = if c == 0 {
-                f64::INFINITY
-            } else {
-                (a as f64 / n_input as f64) / (c as f64 / n_ref as f64)
-            };
+            let fold = if c == 0 { f64::INFINITY } else { (a as f64 / n_input as f64) / (c as f64 / n_ref as f64) };
             let p = fisher_greater(a as u64, (n_input - a) as u64, c as u64, (n_ref - c) as u64, &lf);
-            MotifResult { motif, input_count: a, reference_count: c, fold, p_value: p, q_value: f64::NAN, members: Vec::new() }
+            MotifResult {
+                motif,
+                input_count: a,
+                reference_count: c,
+                fold,
+                p_value: p,
+                q_value: f64::NAN,
+                members: Vec::new(),
+            }
         })
         .collect();
 
@@ -263,10 +259,13 @@ mod tests {
     #[test]
     fn enriched_motif_is_found() {
         let mp = MotifParams { k_values: vec![3], trim_start: 0, trim_end: 0, gapped: false };
-        let input: Vec<Vec<u8>> = ["WWWAAA", "WWWCCC", "WWWDDD", "EEEFFF"].iter().map(|s| s.as_bytes().to_vec()).collect();
-        let reference: Vec<Vec<u8>> = (0..1000).map(|i| if i % 500 == 0 { b"WWWGGG".to_vec() } else { b"GGGHHH".to_vec() }).collect();
+        let input: Vec<Vec<u8>> =
+            ["WWWAAA", "WWWCCC", "WWWDDD", "EEEFFF"].iter().map(|s| s.as_bytes().to_vec()).collect();
+        let reference: Vec<Vec<u8>> =
+            (0..1000).map(|i| if i % 500 == 0 { b"WWWGGG".to_vec() } else { b"GGGHHH".to_vec() }).collect();
         let table = MotifTable::build(&reference, &mp);
-        let ep = EnrichmentParams { min_count: 3, max_p: 0.01, fdr: false, min_fold_by_k: vec![], default_min_fold: 10.0 };
+        let ep =
+            EnrichmentParams { min_count: 3, max_p: 0.01, fdr: false, min_fold_by_k: vec![], default_min_fold: 10.0 };
         let res = motif_enrich(&input, &table, &mp, &ep);
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].motif.to_string(), "WWW");

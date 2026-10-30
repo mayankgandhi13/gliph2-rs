@@ -111,10 +111,7 @@ pub fn assemble_clusters(
         }
     }
 
-    let mut out: Vec<Cluster> = clusters
-        .into_iter()
-        .filter(|c| c.members.len() >= params.min_size.max(1))
-        .collect();
+    let mut out: Vec<Cluster> = clusters.into_iter().filter(|c| c.members.len() >= params.min_size.max(1)).collect();
     for (i, c) in out.iter_mut().enumerate() {
         c.id = i;
         c.motifs.sort_unstable();

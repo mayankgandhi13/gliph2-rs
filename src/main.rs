@@ -61,9 +61,7 @@ impl Args {
         self.0.iter().any(|a| a == flag)
     }
     fn parse<T: std::str::FromStr>(&self, flag: &str) -> Result<Option<T>, String> {
-        self.value(flag)
-            .map(|v| v.parse().map_err(|_| format!("invalid value for {flag}: {v}")))
-            .transpose()
+        self.value(flag).map(|v| v.parse().map_err(|_| format!("invalid value for {flag}: {v}"))).transpose()
     }
     fn require(&self, flag: &str) -> Result<&str, String> {
         self.value(flag).ok_or_else(|| format!("missing {flag}"))
@@ -160,7 +158,10 @@ fn gliph2_cmd(a: &Args) -> Result<(), String> {
         p.lcminp = v;
     }
     if let Some(v) = a.value("--lcminove") {
-        p.lcminove = v.split(',').map(|x| x.parse().map_err(|_| format!("invalid --lcminove: {v}"))).collect::<Result<_, _>>()?;
+        p.lcminove = v
+            .split(',')
+            .map(|x| x.parse().map_err(|_| format!("invalid --lcminove: {v}")))
+            .collect::<Result<_, _>>()?;
     }
     if let Some(v) = a.parse("--kmer-mindepth")? {
         p.kmer_mindepth = v;
@@ -266,7 +267,8 @@ fn main() -> ExitCode {
         "synth" => (|| {
             let n = a.parse("--n")?.ok_or("missing --n")?;
             let seed = a.parse("--seed")?.unwrap_or(1);
-            let seqs = if a.flag("--reference") { synthetic::reference(n, seed) } else { synthetic::repertoire(n, seed) };
+            let seqs =
+                if a.flag("--reference") { synthetic::reference(n, seed) } else { synthetic::repertoire(n, seed) };
             write_seqs(a.require("--out")?, &seqs).map_err(|e| e.to_string())
         })(),
         "expand" => (|| {

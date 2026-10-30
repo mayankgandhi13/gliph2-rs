@@ -187,11 +187,7 @@ impl Gliph2Params {
         if self.lcminove.len() == 1 {
             return self.lcminove[0];
         }
-        self.motif_length
-            .iter()
-            .position(|&k| k == residues)
-            .and_then(|i| self.lcminove.get(i).copied())
-            .unwrap_or(0.0)
+        self.motif_length.iter().position(|&k| k == residues).and_then(|i| self.lcminove.get(i).copied()).unwrap_or(0.0)
     }
 }
 
@@ -344,7 +340,8 @@ fn blosum_compatible(a: u8, b: u8) -> bool {
 }
 
 fn is_working(seq: &[u8], p: &Gliph2Params) -> bool {
-    seq.len() >= p.effective_min_length() && (!p.require_cf || (seq.first() == Some(&b'C') && seq.last() == Some(&b'F')))
+    seq.len() >= p.effective_min_length()
+        && (!p.require_cf || (seq.first() == Some(&b'C') && seq.last() == Some(&b'F')))
 }
 
 fn interior(seq: &[u8], b: usize) -> &[u8] {
@@ -400,9 +397,8 @@ fn motif_tag(m: Kmer) -> String {
 pub fn gliph2(rep: &Repertoire, reference: &[Vec<u8>], p: &Gliph2Params) -> Gliph2Result {
     // turboGliph's `seqs`: unique, C…F, long enough. Repertoire sequences
     // are already unique and amino-acid only.
-    let working: Vec<SequenceId> = (0..rep.len() as SequenceId)
-        .filter(|&i| is_working(&rep.sequences[i as usize], p))
-        .collect();
+    let working: Vec<SequenceId> =
+        (0..rep.len() as SequenceId).filter(|&i| is_working(&rep.sequences[i as usize], p)).collect();
     let mut ref_unique: Vec<&[u8]> = reference.iter().map(Vec::as_slice).filter(|s| is_working(s, p)).collect();
     ref_unique.par_sort_unstable();
     ref_unique.dedup();
@@ -762,8 +758,11 @@ fn hla_index(rep: &Repertoire, table: &HlaTable) -> (Vec<Vec<u32>>, Vec<String>)
         .names
         .iter()
         .map(|donor| {
-            let mut v: Vec<u32> =
-                table.by_donor.get(donor).map(|a| a.iter().filter_map(|x| id.get(x.as_str()).copied()).collect()).unwrap_or_default();
+            let mut v: Vec<u32> = table
+                .by_donor
+                .get(donor)
+                .map(|a| a.iter().filter_map(|x| id.get(x.as_str()).copied()).collect())
+                .unwrap_or_default();
             v.sort_unstable();
             v.dedup();
             v
@@ -797,7 +796,8 @@ fn score_hla(
         .par_iter()
         .enumerate()
         .filter_map(|(i, _)| {
-            let carriers: Vec<u32> = donors[i].iter().copied().filter(|&s| !by_subject[s as usize].is_empty()).collect();
+            let carriers: Vec<u32> =
+                donors[i].iter().copied().filter(|&s| !by_subject[s as usize].is_empty()).collect();
             if carriers.len() < 2 {
                 return None;
             }
@@ -844,7 +844,8 @@ fn annotate_and_filter(rep: &Repertoire, groups: &mut Vec<ConvergenceGroup>, p: 
     for kind in [GroupType::Local, GroupType::Global] {
         let idx: Vec<usize> = (0..groups.len()).filter(|&i| groups[i].kind == kind).collect();
         // NaN p-values (impossible tables) are treated as 1 for ranking.
-        let pv: Vec<f64> = idx.iter().map(|&i| groups[i].fisher_score).map(|x| if x.is_nan() { 1.0 } else { x }).collect();
+        let pv: Vec<f64> =
+            idx.iter().map(|&i| groups[i].fisher_score).map(|x| if x.is_nan() { 1.0 } else { x }).collect();
         for (&i, q) in idx.iter().zip(benjamini_hochberg(&pv)) {
             groups[i].q_value = q;
         }
@@ -906,7 +907,8 @@ fn annotate_and_filter(rep: &Repertoire, groups: &mut Vec<ConvergenceGroup>, p: 
         .par_iter()
         .map(|g| {
             let global_ok = g.kind != GroupType::Global
-                || (p.global_max_p.is_none_or(|t| g.fisher_score <= t) && p.global_max_q.is_none_or(|t| g.q_value <= t));
+                || (p.global_max_p.is_none_or(|t| g.fisher_score <= t)
+                    && p.global_max_q.is_none_or(|t| g.q_value <= t));
             let assoc_ok = p
                 .association
                 .as_ref()
@@ -925,8 +927,9 @@ fn annotate_and_filter(rep: &Repertoire, groups: &mut Vec<ConvergenceGroup>, p: 
 pub fn write_groups(w: &mut impl std::io::Write, rep: &Repertoire, res: &Gliph2Result) -> std::io::Result<()> {
     let association = res.association.is_some();
     let hla = res.hla.is_some();
-    let mut header =
-        String::from("type\ttag\tcluster_size\tunique_cdr3_sample\tunique_cdr3_ref\tOvE\tfisher.score\tfdr.q\tn_subjects");
+    let mut header = String::from(
+        "type\ttag\tcluster_size\tunique_cdr3_sample\tunique_cdr3_ref\tOvE\tfisher.score\tfdr.q\tn_subjects",
+    );
     if association {
         header.push_str("\tcase_donors\tcontrol_donors\tassoc.p\tassoc.q");
     }
@@ -989,7 +992,8 @@ mod tests {
     #[test]
     fn blosum_table_has_112_pairs() {
         let aa = b"ACDEFGHIKLMNPQRSTVWY";
-        let n = aa.iter().flat_map(|&a| aa.iter().map(move |&b| (a, b))).filter(|&(a, b)| blosum_compatible(a, b)).count();
+        let n =
+            aa.iter().flat_map(|&a| aa.iter().map(move |&b| (a, b))).filter(|&(a, b)| blosum_compatible(a, b)).count();
         assert_eq!(n, 112);
         assert!(blosum_compatible(b'I', b'V') && blosum_compatible(b'V', b'I') && !blosum_compatible(b'W', b'A'));
     }
@@ -1031,7 +1035,8 @@ mod tests {
             seqs.push(format!("CASDEKDEWWW{}YF", "GHT".repeat(1 + j)));
         }
         let r = rep(&seqs.iter().map(String::as_str).collect::<Vec<_>>());
-        let reference: Vec<Vec<u8>> = (0..200).map(|i| format!("CASSL{}GYTF", "AQ".repeat(1 + i % 5)).into_bytes()).collect();
+        let reference: Vec<Vec<u8>> =
+            (0..200).map(|i| format!("CASSL{}GYTF", "AQ".repeat(1 + i % 5)).into_bytes()).collect();
         let p = Gliph2Params { global: false, lcminove: vec![1.0], ..Default::default() };
         let res = gliph2(&r, &reference, &p);
         let www: Vec<_> = res.groups.iter().filter(|g| g.tag(&r).starts_with("WWW_")).collect();
@@ -1111,9 +1116,15 @@ mod tests {
         }
         let r = Repertoire::from_records(records);
         let assoc = Association { min_donors: 2, ..Association::new("CMV+", "CMV-") };
-        let p = Gliph2Params { local: false, all_aa_interchangeable: true, association: Some(assoc.clone()), ..Default::default() };
+        let p = Gliph2Params {
+            local: false,
+            all_aa_interchangeable: true,
+            association: Some(assoc.clone()),
+            ..Default::default()
+        };
         // Permuting labels keeps the totals.
-        let perm = Gliph2Params { association: Some(Association { permute_seed: Some(7), ..assoc.clone() }), ..p.clone() };
+        let perm =
+            Gliph2Params { association: Some(Association { permute_seed: Some(7), ..assoc.clone() }), ..p.clone() };
         let ps = gliph2(&r, &[], &perm).association.unwrap();
         assert_eq!((ps.n_case, ps.n_control), (6, 6));
         let res = gliph2(&r, &[], &p);
@@ -1159,11 +1170,7 @@ mod tests {
             }
             by_donor.insert(format!("D{i}"), alleles);
         }
-        let p = Gliph2Params {
-            local: false,
-            hla: Some(HlaTable { by_donor }),
-            ..Default::default()
-        };
+        let p = Gliph2Params { local: false, hla: Some(HlaTable { by_donor }), ..Default::default() };
         let res = gliph2(&r, &[], &p);
         let s = res.hla.unwrap();
         assert_eq!(s.typed_donors, 20);
